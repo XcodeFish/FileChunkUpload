@@ -1,7 +1,7 @@
+import { EventName, HandlerTimeoutError, IEventOptions, IHook } from '@file-chunk-uploader/types';
+
 import { Logger } from '../developer-mode/logger';
 import { LogLevel } from '../developer-mode/types';
-
-import { EventName, HandlerTimeoutError, IEventOptions, IHook } from './types';
 
 /**
  * 默认钩子选项

@@ -19,48 +19,10 @@
  * unsubscribe();
  * ```
  */
+import { IEventEmitter, NamespacedEvent, IHook, Namespace } from '@file-chunk-uploader/types';
+
 import { EventBus } from './event-bus';
-import { EventEmitter } from './event-emitter';
 import { Hook } from './hooks';
-import {
-  IEventEmitter,
-  EventHandler,
-  IEventOptions,
-  IHook,
-  UploadEventType,
-  HookType,
-  EventName,
-  Namespace,
-  NamespacedEvent,
-  HandlerTimeoutError,
-  IEventHandlerWithPriority,
-} from './types';
-
-// 导出实现类
-export {
-  EventEmitter,
-  EventBus,
-  Hook,
-
-  // 枚举类型
-  UploadEventType,
-  HookType,
-
-  // 错误类型
-  HandlerTimeoutError,
-};
-
-// 导出类型定义
-export type {
-  IEventEmitter,
-  EventHandler,
-  IEventOptions,
-  IHook,
-  EventName,
-  Namespace,
-  NamespacedEvent,
-  IEventHandlerWithPriority,
-};
 
 /**
  * 创建全局事件总线实例

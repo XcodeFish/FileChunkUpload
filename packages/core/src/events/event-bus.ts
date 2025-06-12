@@ -1,5 +1,12 @@
+import {
+  EventHandler,
+  EventName,
+  IEventEmitter,
+  IEventOptions,
+  Namespace,
+} from '@file-chunk-uploader/types';
+
 import { EventEmitter } from './event-emitter';
-import { EventHandler, EventName, IEventEmitter, IEventOptions, Namespace } from './types';
 
 /**
  * 全局事件总线
@@ -7,7 +14,7 @@ import { EventHandler, EventName, IEventEmitter, IEventOptions, Namespace } from
  */
 export class EventBus {
   private static instance: EventBus | null = null;
-  private emitter: IEventEmitter;
+  private emitter: EventEmitter;
 
   /**
    * 创建事件总线实例
@@ -43,7 +50,7 @@ export class EventBus {
    * 获取底层事件发射器
    * @returns 事件发射器
    */
-  public getEmitter(): IEventEmitter {
+  public getEmitter(): EventEmitter {
     return this.emitter;
   }
 
@@ -53,7 +60,7 @@ export class EventBus {
    * @returns 命名空间事件发射器
    */
   public createNamespaced(namespace: Namespace): IEventEmitter {
-    return this.emitter.createNamespacedEmitter(namespace);
+    return this.emitter.createNamespacedEmitter(namespace) as unknown as IEventEmitter;
   }
 
   /**
@@ -68,7 +75,10 @@ export class EventBus {
     handler: EventHandler<TData>,
     options?: IEventOptions,
   ): () => void {
-    return this.emitter.on(event, handler, options);
+    this.emitter.on(event, handler, options);
+    return () => {
+      this.off(event, handler);
+    };
   }
 
   /**
@@ -83,7 +93,16 @@ export class EventBus {
     handler: EventHandler<TData>,
     options?: IEventOptions,
   ): Array<() => void> {
-    return this.emitter.onBatch(events, handler, options);
+    if (!events || events.length === 0) {
+      return [];
+    }
+
+    return events.map(event => {
+      this.emitter.on(event, handler, options);
+      return () => {
+        this.off(event, handler);
+      };
+    });
   }
 
   /**
@@ -98,7 +117,10 @@ export class EventBus {
     handler: EventHandler<TData>,
     options?: Omit<IEventOptions, 'once'>,
   ): () => void {
-    return this.emitter.once(event, handler, options);
+    this.emitter.once(event, handler, options);
+    return () => {
+      this.off(event, handler);
+    };
   }
 
   /**
@@ -107,7 +129,7 @@ export class EventBus {
    * @param handler 可选的特定处理函数
    */
   public off<TData = unknown>(event: EventName, handler?: EventHandler<TData>): void {
-    this.emitter.off(event, handler);
+    this.emitter.off(event, handler as EventHandler<unknown>);
   }
 
   /**
@@ -142,7 +164,7 @@ export class EventBus {
    * @returns 事件名称数组
    */
   public getEventNames(): EventName[] {
-    return this.emitter.getEventNames();
+    return this.emitter.getEventNames() as unknown as EventName[];
   }
 
   /**

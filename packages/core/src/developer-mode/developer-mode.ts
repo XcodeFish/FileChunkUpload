@@ -7,37 +7,48 @@ import { PluginTracer } from './plugin-tracer';
 import { IDeveloperModeConfig, LogLevel } from './types';
 
 /**
- * 通用配置深度合并函数
- * 将用户配置与默认配置合并，确保必填属性存在
+ * 合并用户配置与默认配置
+ * 支持深度合并对象并防止循环引用
  */
 function mergeWithDefaults<T extends Record<string, any>>(
   defaultConfig: T,
   userConfig?: Partial<T>,
+  seen: WeakMap<object, boolean> = new WeakMap(),
 ): T {
-  if (!userConfig) {
-    return { ...defaultConfig };
-  }
-
   const result = { ...defaultConfig };
 
-  // 遍历用户配置的所有属性
+  if (!userConfig) {
+    return result;
+  }
+
+  // 检测循环引用
+  if (typeof userConfig === 'object' && userConfig !== null) {
+    if (seen.has(userConfig)) {
+      // 检测到循环引用，直接返回当前结果
+      return result;
+    }
+    seen.set(userConfig, true);
+  }
+
   for (const key in userConfig) {
     if (Object.prototype.hasOwnProperty.call(userConfig, key)) {
       const value = userConfig[key];
 
-      // 如果是对象且不是null，进行递归合并
+      // 检查值是否为对象，如果是则递归合并
       if (
+        value !== undefined &&
         value !== null &&
         typeof value === 'object' &&
         !Array.isArray(value) &&
         defaultConfig[key] !== null &&
         typeof defaultConfig[key] === 'object'
       ) {
-        // 递归合并嵌套对象
-        result[key] = mergeWithDefaults(defaultConfig[key], value);
+        // 递归合并嵌套对象，传递引用跟踪集合
+        result[key] = mergeWithDefaults(defaultConfig[key], value, seen);
       } else if (value !== undefined) {
         // 对于非对象或undefined值，直接使用用户配置
-        result[key] = value;
+        // 使用类型断言确保类型兼容性
+        result[key] = value as T[Extract<keyof T, string>];
       }
     }
   }

@@ -1,6 +1,3 @@
-import { Logger } from '../developer-mode/logger';
-import { LogLevel } from '../developer-mode/types';
-
 import {
   EventHandler,
   EventHandlerError,
@@ -10,10 +7,13 @@ import {
   IEventEmitOptions,
   IEventEmitter,
   IEventHandlerWithPriority,
+  IEventListener,
   IEventOptions,
   Namespace,
-  NamespacedEvent,
-} from './types';
+} from '@file-chunk-uploader/types';
+
+import { Logger } from '../developer-mode/logger';
+import { LogLevel } from '../developer-mode/types';
 
 /**
  * 默认事件选项
@@ -73,28 +73,31 @@ class NamespacedEventEmitter implements IEventEmitter {
    * @param event 原始事件名
    * @returns 带命名空间的事件名
    */
-  private namespacedEvent(event: EventName): NamespacedEvent<string> {
-    return `${this.namespace}:${event}`;
+  private namespacedEvent(event: EventName): EventName {
+    return `${this.namespace}:${event}` as EventName;
   }
 
   on<TData = unknown>(
     event: EventName,
     handler: EventHandler<TData>,
     options?: IEventOptions,
-  ): () => void {
-    return this.parentEmitter.on(this.namespacedEvent(event), handler, options);
+  ): this {
+    this.parentEmitter.on(this.namespacedEvent(event), handler, options);
+    return this;
   }
 
   once<TData = unknown>(
     event: EventName,
     handler: EventHandler<TData>,
     options?: Omit<IEventOptions, 'once'>,
-  ): () => void {
-    return this.parentEmitter.once(this.namespacedEvent(event), handler, options);
+  ): this {
+    this.parentEmitter.once(this.namespacedEvent(event), handler, options);
+    return this;
   }
 
-  off<TData = unknown>(event: EventName, handler?: EventHandler<TData>): void {
+  off(event: EventName, handler?: EventHandler<unknown>): this {
     this.parentEmitter.off(this.namespacedEvent(event), handler);
+    return this;
   }
 
   async emit<TData = unknown>(
@@ -172,7 +175,13 @@ class NamespacedEventEmitter implements IEventEmitter {
     handler: EventHandler<TData>,
     options?: IEventOptions,
   ): Array<() => void> {
-    return events.map(event => this.on(event, handler, options));
+    return events.map(event => {
+      this.on(event, handler, options);
+      // 返回取消订阅函数
+      return () => {
+        this.off(event, handler as EventHandler<unknown>);
+      };
+    });
   }
 
   hasListeners(event: EventName): boolean {
@@ -187,20 +196,36 @@ class NamespacedEventEmitter implements IEventEmitter {
       .map(name => name.substring(prefix.length) as EventName);
   }
 
-  removeAllListeners(): void {
-    const prefix = `${this.namespace}:`;
-    const namespacedEvents = this.parentEmitter
-      .getEventNames()
-      .filter(name => name.startsWith(prefix));
+  removeAllListeners(eventName?: string): this {
+    if (eventName) {
+      this.parentEmitter.off(this.namespacedEvent(eventName as EventName));
+    } else {
+      const prefix = `${this.namespace}:`;
+      const namespacedEvents = this.parentEmitter
+        .getEventNames()
+        .filter(name => name.startsWith(prefix));
 
-    namespacedEvents.forEach(event => {
-      this.parentEmitter.off(event);
-    });
+      namespacedEvents.forEach(event => {
+        this.parentEmitter.off(event);
+      });
+    }
+    return this;
   }
 
   createNamespacedEmitter(namespace: Namespace): IEventEmitter {
     // 嵌套命名空间，使用冒号连接
     return new NamespacedEventEmitter(this.parentEmitter, `${this.namespace}:${namespace}`);
+  }
+
+  /**
+   * 获取事件监听器
+   * @param eventName 事件名称
+   * @returns 该事件的所有监听器
+   */
+  listeners(eventName: string): Array<IEventListener> {
+    const namespacedEvent = this.namespacedEvent(eventName as EventName);
+    // 将IEventHandlerWithPriority转换为IEventListener
+    return this.parentEmitter.listeners(namespacedEvent);
   }
 }
 
@@ -253,13 +278,13 @@ export class EventEmitter implements IEventEmitter {
    * @param event 事件名
    * @param handler 事件处理函数
    * @param options 选项
-   * @returns 取消订阅函数
+   * @returns this 实例，用于链式调用
    */
   public on<TData = unknown>(
     event: EventName,
     handler: EventHandler<TData>,
     options?: IEventOptions,
-  ): () => void {
+  ): this {
     const finalOptions: IEventOptions = { ...DEFAULT_EVENT_OPTIONS, ...options };
 
     // 生成唯一ID（如果没有提供）
@@ -299,10 +324,7 @@ export class EventEmitter implements IEventEmitter {
       handlerId: finalOptions.id,
     });
 
-    // 返回取消订阅函数
-    return () => {
-      this.removeHandler(event, handler as EventHandler<unknown>);
-    };
+    return this;
   }
 
   /**
@@ -317,7 +339,13 @@ export class EventEmitter implements IEventEmitter {
     handler: EventHandler<TData>,
     options?: IEventOptions,
   ): Array<() => void> {
-    return events.map(event => this.on(event, handler, options));
+    return events.map(event => {
+      this.on(event, handler, options);
+      // 返回取消订阅函数
+      return () => {
+        this.off(event, handler as EventHandler<unknown>);
+      };
+    });
   }
 
   /**
@@ -325,23 +353,25 @@ export class EventEmitter implements IEventEmitter {
    * @param event 事件名
    * @param handler 事件处理函数
    * @param options 选项
-   * @returns 取消订阅函数
+   * @returns this 实例，用于链式调用
    */
   public once<TData = unknown>(
     event: EventName,
     handler: EventHandler<TData>,
     options?: Omit<IEventOptions, 'once'>,
-  ): () => void {
-    return this.on(event, handler, { ...options, once: true });
+  ): this {
+    this.on(event, handler, { ...options, once: true });
+    return this;
   }
 
   /**
    * 移除事件监听器
    * @param event 事件名
    * @param handler 可选的特定处理函数
+   * @returns this 实例，用于链式调用
    */
-  public off<TData = unknown>(event: EventName, handler?: EventHandler<TData>): void {
-    if (!this.events.has(event)) return;
+  public off(event: EventName, handler?: EventHandler<unknown>): this {
+    if (!this.events.has(event)) return this;
 
     if (!handler) {
       // 如果没有指定处理函数，则移除此事件的所有监听器
@@ -357,8 +387,10 @@ export class EventEmitter implements IEventEmitter {
       this.sortedHandlersCache.delete(event);
       this.logDebug(`移除所有事件处理函数: ${event}`);
     } else {
-      this.removeHandler(event, handler as EventHandler<unknown>);
+      this.removeHandler(event, handler);
     }
+
+    return this;
   }
 
   /**
@@ -673,6 +705,31 @@ export class EventEmitter implements IEventEmitter {
   }
 
   /**
+   * 获取事件监听器
+   * @param eventName 事件名称
+   * @returns 该事件的所有监听器
+   */
+  public listeners(eventName: string): Array<IEventListener> {
+    if (!this.events.has(eventName as EventName)) return [];
+
+    // 将IEventHandlerWithPriority转换为IEventListener
+    return this.events.get(eventName as EventName)!.map(handler => {
+      return {
+        handler: handler.handler,
+        options: {
+          once: handler.once,
+          priority: handler.priority,
+          filter: handler.filter,
+          timeout: handler.timeout,
+          context: handler.context,
+          id: handler.id,
+          catchError: handler.catchError,
+        },
+      };
+    });
+  }
+
+  /**
    * 获取所有已注册的事件名称
    * @returns 事件名称数组
    */
@@ -713,21 +770,29 @@ export class EventEmitter implements IEventEmitter {
 
   /**
    * 移除所有事件监听器
+   * @param eventName 可选的事件名称，如不提供则移除所有事件监听器
+   * @returns this 实例，用于链式调用
    */
-  public removeAllListeners(): void {
-    // 清除所有超时定时器
-    this.events.forEach((handlers, event) => {
-      handlers.forEach(h => {
-        this.clearHandlerTimeout(h.handler);
+  public removeAllListeners(eventName?: string): this {
+    if (eventName) {
+      this.off(eventName as EventName);
+    } else {
+      // 清除所有超时定时器
+      this.events.forEach((handlers, event) => {
+        handlers.forEach(h => {
+          this.clearHandlerTimeout(h.handler);
+        });
+        this.logDebug(`移除所有事件处理函数: ${event}`);
       });
-      this.logDebug(`移除所有事件处理函数: ${event}`);
-    });
 
-    // 清空事件映射
-    this.events.clear();
-    this.sortedHandlersCache.clear();
-    this.sortVersions.clear();
-    this.logDebug('移除所有事件监听器');
+      // 清空事件映射
+      this.events.clear();
+      this.sortedHandlersCache.clear();
+      this.sortVersions.clear();
+      this.logDebug('移除所有事件监听器');
+    }
+
+    return this;
   }
 
   /**
