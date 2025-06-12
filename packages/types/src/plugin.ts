@@ -83,24 +83,49 @@ export interface IPluginOptions {
 }
 
 /**
+ * 插件状态
+ */
+export enum PluginState {
+  ENABLED = 'enabled',
+  DISABLED = 'disabled',
+  PENDING = 'pending',
+  FAILED = 'failed',
+}
+
+/**
+ * 钩子执行模式
+ */
+export type HookExecutionMode = 'sequential' | 'parallel' | 'parallel-merge';
+
+/**
  * 插件管理器接口
  * 负责管理插件的注册、卸载和调用
  */
 export interface IPluginManager {
   /** 注册插件 */
-  register(plugin: IPlugin): void;
-  /** 注销插件 */
+  register(plugin: IPlugin, config?: unknown): boolean;
+  /** 卸载插件 */
   unregister(pluginName: string): boolean;
   /** 调用钩子 */
   invokeHook<T>(hookName: keyof IPluginLifecycle, initialValue: T, ...args: unknown[]): Promise<T>;
-  /** 检查插件兼容性 */
-  checkCompatibility(plugin: IPlugin): boolean;
   /** 获取已注册插件 */
-  getPlugins(): Map<string, IPlugin>;
+  getPlugins(): IPlugin[];
   /** 获取插件 */
   getPlugin(name: string): IPlugin | undefined;
-  /** 是否已注册插件 */
-  hasPlugin(name: string): boolean;
+  /** 设置钩子执行模式 */
+  setHookExecutionMode?(hookName: keyof IPluginLifecycle, mode: HookExecutionMode): void;
+  /** 启用插件 */
+  enablePlugin?(pluginName: string): boolean;
+  /** 禁用插件 */
+  disablePlugin?(pluginName: string): boolean;
+  /** 获取插件状态 */
+  getPluginState?(pluginName: string): PluginState | undefined;
+  /** 获取插件配置 */
+  getPluginConfig?<T = any>(pluginName: string): T | undefined;
+  /** 更新插件配置 */
+  updatePluginConfig?(pluginName: string, config: any): boolean;
+  /** 获取插件健康信息 */
+  getPluginHealth?(pluginName?: string): any;
 }
 
 /**
