@@ -42,3 +42,6 @@ export * from './uploader';
 
 // Worker相关类型
 export * from './worker';
+
+// 导出ETACalculator相关类型
+export * from './etaCalculator';
