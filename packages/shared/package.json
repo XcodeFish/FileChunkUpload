@@ -1,0 +1,43 @@
+{
+  "name": "@file-chunk-uploader/shared",
+  "version": "1.0.0",
+  "description": "框架适配器共享代码",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "clean": "rimraf dist",
+    "lint": "eslint src --ext .ts",
+    "test": "jest"
+  },
+  "keywords": [
+    "file",
+    "upload",
+    "chunk",
+    "resumable",
+    "shared"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@file-chunk-uploader/core": "1.0.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^24.0.1",
+    "@rollup/plugin-node-resolve": "^15.0.1",
+    "@rollup/plugin-terser": "^0.4.0",
+    "@rollup/plugin-typescript": "^11.0.0",
+    "rimraf": "^4.1.2",
+    "rollup": "^3.15.0",
+    "rollup-plugin-dts": "^5.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

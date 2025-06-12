@@ -1,0 +1,26 @@
+{
+  "name": "@file-chunk-uploader/resume",
+  "version": "0.1.0",
+  "description": "Resumable upload functionality for file-chunk-uploader",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "lint": "eslint --ext .ts,.tsx src",
+    "test": "jest",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@file-chunk-uploader/core": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "",
+  "license": "MIT"
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@file-chunk-uploader/standard",
+  "version": "0.1.0",
+  "description": "Standard functionality bundle for file-chunk-uploader",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "lint": "eslint --ext .ts,.tsx src",
+    "test": "jest",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@file-chunk-uploader/core": "workspace:*",
+    "@file-chunk-uploader/chunk": "workspace:*",
+    "@file-chunk-uploader/resume": "workspace:*",
+    "@file-chunk-uploader/network": "workspace:*",
+    "@file-chunk-uploader/errors": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "",
+  "license": "MIT"
+}
