@@ -45,3 +45,6 @@ export * from './worker';
 
 // 导出ETACalculator相关类型
 export * from './etaCalculator';
+
+// 分片模块类型
+export * from './chunk';
