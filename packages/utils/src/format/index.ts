@@ -80,16 +80,20 @@ export function formatDuration(ms: number, compact = false): string {
     return `${seconds}s`;
   } else {
     const parts = [];
+    const hasHours = hours > 0;
+    const hasMinutes = remainingMinutes > 0;
+    const hasSeconds = remainingSeconds > 0;
+    const isEmpty = !hasHours && !hasMinutes && !hasSeconds;
 
-    if (hours > 0) {
+    if (hasHours) {
       parts.push(`${hours} ${hours === 1 ? 'hour' : 'hours'}`);
     }
 
-    if (remainingMinutes > 0 || hours > 0) {
+    if (hasMinutes || (hasHours && !hasSeconds)) {
       parts.push(`${remainingMinutes} ${remainingMinutes === 1 ? 'minute' : 'minutes'}`);
     }
 
-    if (remainingSeconds > 0 || (hours === 0 && remainingMinutes === 0)) {
+    if (hasSeconds || isEmpty) {
       parts.push(`${remainingSeconds} ${remainingSeconds === 1 ? 'second' : 'seconds'}`);
     }
 

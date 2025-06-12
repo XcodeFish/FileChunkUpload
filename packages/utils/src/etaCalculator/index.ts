@@ -5,6 +5,12 @@
 
 import { IETACalculatorOptions, ISpeedSample, IETAResult } from '@file-chunk-uploader/types';
 
+// 常量定义
+const MAX_ETA_SECONDS = 24 * 3600; // 最大显示时间为24小时
+const MIN_SPEED_THRESHOLD = 10; // 最小有效速度阈值（字节/秒）
+const STABLE_SAMPLE_THRESHOLD = 10; // 稳定状态的样本数阈值
+const NETWORK_RECONNECT_TIMEOUT = 5000; // 网络重连检测时间（毫秒）
+
 /**
  * 动态剩余时间计算器
  * 使用三重权重平滑和自适应学习机制，确保预测结果既稳定又响应迅速
@@ -64,7 +70,7 @@ export class ETACalculator {
       const byteDelta = uploadedBytes - lastSample.bytes;
 
       // 检测网络中断后重连（长时间无进度后突然有进度）
-      const isReconnecting = timeSinceLastSample > 5000 && byteDelta > 0;
+      const isReconnecting = timeSinceLastSample > NETWORK_RECONNECT_TIMEOUT && byteDelta > 0;
 
       if (isReconnecting) {
         // 重连后重置部分历史数据，避免之前的停滞数据影响预测
@@ -107,6 +113,7 @@ export class ETACalculator {
 
         // 过滤异常峰值（速度异常高或低）
         if (currentSpeed > avgSpeed * 3 || (avgSpeed > 0 && currentSpeed < avgSpeed * 0.2)) {
+          // 对异常值进行调整而非直接舍弃，保留一定变化趋势
           currentSpeed = avgSpeed * (currentSpeed > avgSpeed ? 1.5 : 0.5);
         }
       }
@@ -151,7 +158,10 @@ export class ETACalculator {
       };
     }
 
+    // 计算剩余的字节数
     const totalRemaining = this.lastTotalSize - this.samples[this.samples.length - 1].bytes;
+
+    // 上传已完成
     if (totalRemaining <= 0) {
       return {
         seconds: 0,
@@ -164,16 +174,25 @@ export class ETACalculator {
     // 计算三重加权速度
     const weightedSpeed = this.calculateWeightedSpeed();
 
-    // 动态学习系数
+    // 如果加权速度为0或无效，返回无法预测
+    if (!weightedSpeed || weightedSpeed <= 0) {
+      return {
+        seconds: null,
+        formatted: '--:--:--',
+        networkState: 'stabilizing',
+        sampleCount: this.samples.length,
+      };
+    }
+
+    // 动态学习系数 - 网络波动大时倾向于平滑历史数据
     const learningRate = this.calculateLearningRate();
 
-    // 应用自适应平滑
+    // 应用自适应平滑 - 结合当前速度和历史预测值
     const adaptiveSpeed =
       learningRate * weightedSpeed + (1 - learningRate) * (this.lastPrediction || weightedSpeed);
 
     // 处理极低速度场景
-    if (adaptiveSpeed < 10) {
-      // 10字节/秒作为极低速度阈值
+    if (adaptiveSpeed < MIN_SPEED_THRESHOLD) {
       return {
         seconds: null,
         formatted: '--:--:--',
@@ -186,16 +205,15 @@ export class ETACalculator {
     let etaSeconds = totalRemaining / adaptiveSpeed;
 
     // 处理剩余时间过大的情况
-    if (etaSeconds > 24 * 3600) {
-      // 超过24小时
-      etaSeconds = 24 * 3600; // 最多显示24小时
+    if (etaSeconds > MAX_ETA_SECONDS) {
+      etaSeconds = MAX_ETA_SECONDS;
     }
 
-    // 保存本次预测
+    // 保存本次预测速度，用于下次计算的平滑处理
     this.lastPrediction = adaptiveSpeed;
 
-    // 确定网络状态
-    const networkState = this.samples.length >= 10 ? 'stable' : 'stabilizing';
+    // 确定网络状态 - 样本足够多视为稳定状态
+    const networkState = this.samples.length >= STABLE_SAMPLE_THRESHOLD ? 'stable' : 'stabilizing';
 
     return {
       seconds: etaSeconds > 0 ? etaSeconds : null,
@@ -247,14 +265,25 @@ export class ETACalculator {
    * @private
    */
   private divideSamples(segments: number): ISpeedSample[][] {
-    const segmentSize = Math.floor(this.samples.length / segments);
-    const result = [];
+    // 边界情况处理
+    if (this.samples.length === 0) return Array(segments).fill([]);
+    if (segments <= 1) return [this.samples];
 
-    for (let i = 0; i < segments; i++) {
+    // 确保段数不超过样本数
+    const actualSegments = Math.min(segments, this.samples.length);
+    const segmentSize = Math.floor(this.samples.length / actualSegments);
+    const result: ISpeedSample[][] = [];
+
+    for (let i = 0; i < actualSegments; i++) {
       const start = i * segmentSize;
-      // 修复end计算逻辑
-      const end = i === segments - 1 ? this.samples.length : (i + 1) * segmentSize;
+      // 最后一段取到末尾，确保所有样本都被使用
+      const end = i === actualSegments - 1 ? this.samples.length : (i + 1) * segmentSize;
       result.push(this.samples.slice(start, end));
+    }
+
+    // 如果由于舍入导致段数不足，补充空段
+    while (result.length < segments) {
+      result.push([]);
     }
 
     return result;
@@ -276,11 +305,22 @@ export class ETACalculator {
       speeds.push(byteDelta / timeDelta);
     }
 
-    const maxSpeed = Math.max(...speeds);
-    const minSpeed = Math.min(...speeds.filter(s => s > 0));
+    // 安全地计算最大和最小速度
+    const validSpeeds = speeds.filter(s => s > 0);
+
+    if (validSpeeds.length === 0) {
+      // 没有有效速度样本时返回默认值
+      return 0.5;
+    }
+
+    const maxSpeed = Math.max(...validSpeeds);
+    const minSpeed = Math.min(...validSpeeds);
+
+    // 计算波动率（值域0-1，越接近1表示波动越大）
     const volatility = maxSpeed > 0 ? (maxSpeed - minSpeed) / maxSpeed : 0;
 
     // 平滑过渡的学习率（避免突变）
+    // 波动越大，学习率越低，越重视历史数据以保持稳定
     const baseLearningRate = this.smoothingFactor;
     return Math.max(0.3, baseLearningRate * (1 - volatility * 0.7));
   }

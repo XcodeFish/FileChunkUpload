@@ -12,13 +12,22 @@ export function throttle<T extends (...args: any[]) => any>(
     leading?: boolean; // 是否在延迟开始前调用
     trailing?: boolean; // 是否在延迟结束后调用
   } = {},
-): (...args: Parameters<T>) => ReturnType<T> | undefined {
+): (
+  ...args: Parameters<T>
+) => ReturnType<T> extends Promise<any>
+  ? Promise<Awaited<ReturnType<T>>>
+  : ReturnType<T> | undefined {
   const { leading = true, trailing = true } = options;
   let lastArgs: Parameters<T> | null = null;
   let result: ReturnType<T>;
   let lastCallTime: number | null = null;
   let timerId: ReturnType<typeof setTimeout> | null = null;
   let lastContext: any = null;
+  let lastPromise: Promise<any> | null = null;
+
+  // 检查函数返回值是否为Promise
+  const isPromise = (value: any): value is Promise<any> =>
+    value !== null && typeof value === 'object' && typeof value.then === 'function';
 
   // 计算剩余等待时间
   function getRemainingWait(time: number): number {
@@ -36,7 +45,14 @@ export function throttle<T extends (...args: any[]) => any>(
     lastContext = null;
     lastCallTime = time;
 
-    return (result = fn.apply(context, args));
+    result = fn.apply(context, args);
+
+    // 如果返回值是Promise，保存它以便后续处理
+    if (isPromise(result)) {
+      lastPromise = result;
+    }
+
+    return result;
   }
 
   // 执行延迟调用
@@ -68,6 +84,7 @@ export function throttle<T extends (...args: any[]) => any>(
     lastContext = null;
     lastCallTime = null;
     timerId = null;
+    lastPromise = null;
   }
 
   // 立即执行
@@ -90,7 +107,7 @@ export function throttle<T extends (...args: any[]) => any>(
   }
 
   // 主函数
-  function throttled(this: any, ...args: Parameters<T>): ReturnType<T> | undefined {
+  function throttled(this: any, ...args: Parameters<T>): any {
     const now = Date.now();
     const isInvoking = lastCallTime === null;
 
@@ -101,7 +118,13 @@ export function throttle<T extends (...args: any[]) => any>(
     // 如果是第一次调用
     if (isInvoking) {
       if (leading) {
-        return invokeFunc(now);
+        const invokeResult = invokeFunc(now);
+
+        // 处理异步函数
+        if (isPromise(invokeResult)) {
+          return invokeResult;
+        }
+        return invokeResult;
       }
       lastCallTime = now;
     }
@@ -116,6 +139,11 @@ export function throttle<T extends (...args: any[]) => any>(
       }
     }
 
+    // 处理异步场景
+    if (isPromise(result)) {
+      return lastPromise;
+    }
+
     return result;
   }
 
@@ -123,5 +151,5 @@ export function throttle<T extends (...args: any[]) => any>(
   throttled.cancel = cancel;
   throttled.flush = flush;
 
-  return throttled;
+  return throttled as any;
 }

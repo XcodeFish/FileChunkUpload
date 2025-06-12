@@ -5,11 +5,17 @@
 /**
  * 深度克隆对象
  * @param obj 要克隆的对象
+ * @param visited 已访问的对象Map，用于检测循环引用
  * @returns 克隆后的对象
  */
-export function deepClone<T>(obj: T): T {
+export function deepClone<T>(obj: T, visited = new Map<any, any>()): T {
   if (obj === null || typeof obj !== 'object') {
     return obj;
+  }
+
+  // 检查是否已经克隆过该对象（处理循环引用）
+  if (visited.has(obj)) {
+    return visited.get(obj);
   }
 
   // 处理日期对象
@@ -17,15 +23,57 @@ export function deepClone<T>(obj: T): T {
     return new Date(obj.getTime()) as unknown as T;
   }
 
+  // 处理正则表达式
+  if (obj instanceof RegExp) {
+    return new RegExp(obj.source, obj.flags) as unknown as T;
+  }
+
+  // 处理Map对象
+  if (obj instanceof Map) {
+    const clonedMap = new Map();
+    visited.set(obj, clonedMap);
+
+    obj.forEach((value, key) => {
+      // 递归克隆键和值
+      clonedMap.set(deepClone(key, visited), deepClone(value, visited));
+    });
+
+    return clonedMap as unknown as T;
+  }
+
+  // 处理Set对象
+  if (obj instanceof Set) {
+    const clonedSet = new Set();
+    visited.set(obj, clonedSet);
+
+    obj.forEach(value => {
+      // 递归克隆值
+      clonedSet.add(deepClone(value, visited));
+    });
+
+    return clonedSet as unknown as T;
+  }
+
   // 处理数组
   if (Array.isArray(obj)) {
-    return obj.map(item => deepClone(item)) as unknown as T;
+    const clonedArray: any[] = [];
+    // 将新数组添加到已访问的Map中，以处理循环引用
+    visited.set(obj, clonedArray);
+
+    obj.forEach((item, index) => {
+      clonedArray[index] = deepClone(item, visited);
+    });
+
+    return clonedArray as unknown as T;
   }
 
   // 处理普通对象
   const cloned = {} as Record<string, any>;
+  // 将新对象添加到已访问的Map中，以处理循环引用
+  visited.set(obj, cloned);
+
   Object.keys(obj as Record<string, any>).forEach(key => {
-    cloned[key] = deepClone((obj as Record<string, any>)[key]);
+    cloned[key] = deepClone((obj as Record<string, any>)[key], visited);
   });
 
   return cloned as T;
@@ -44,13 +92,26 @@ export function isObject(obj: unknown): obj is Record<string, any> {
  * 深度合并对象
  * @param target 目标对象，会被修改
  * @param source 源对象
+ * @param seen 已处理的对象引用Map，用于检测循环引用
  * @returns 合并后的对象
  */
 export function deepMerge<T extends Record<string, any>, U extends Record<string, any>>(
   target: T,
   source: U,
+  seen?: Map<any, any>,
 ): T & U {
+  // 初始化引用追踪Map
+  const refs = seen || new Map();
+
+  // 检查循环引用
+  if (refs.has(source)) {
+    return refs.get(source);
+  }
+
   const result = { ...target } as Record<string, any>;
+
+  // 将结果添加到引用Map中
+  refs.set(source, result);
 
   if (isObject(source)) {
     Object.keys(source).forEach(key => {
@@ -61,8 +122,13 @@ export function deepMerge<T extends Record<string, any>, U extends Record<string
         // 合并数组，不去重
         result[key] = [...targetValue, ...sourceValue];
       } else if (isObject(sourceValue) && isObject(targetValue)) {
-        // 递归合并对象
-        result[key] = deepMerge(targetValue, sourceValue);
+        // 检查targetValue是否已经在引用链中
+        if (refs.has(targetValue)) {
+          result[key] = refs.get(targetValue);
+        } else {
+          // 递归合并对象，传递引用Map
+          result[key] = deepMerge(targetValue, sourceValue, refs);
+        }
       } else {
         // 基本类型或不匹配类型，直接覆盖
         result[key] = sourceValue;
@@ -83,10 +149,12 @@ export function deepMergeAll<T extends Record<string, any>>(
   target: T,
   ...sources: Record<string, any>[]
 ): T {
+  // 创建引用追踪Map
+  const refs = new Map();
   let result = { ...target };
 
   sources.forEach(source => {
-    result = deepMerge(result, source);
+    result = deepMerge(result, source, refs);
   });
 
   return result as T;

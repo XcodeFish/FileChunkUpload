@@ -284,6 +284,56 @@ export function isEqual(obj1: unknown, obj2: unknown): boolean {
     return false;
   }
 
+  // 处理日期对象
+  if (obj1 instanceof Date && obj2 instanceof Date) {
+    return obj1.getTime() === obj2.getTime();
+  }
+
+  // 处理正则表达式
+  if (obj1 instanceof RegExp && obj2 instanceof RegExp) {
+    return obj1.toString() === obj2.toString();
+  }
+
+  // 处理Map对象
+  if (obj1 instanceof Map && obj2 instanceof Map) {
+    if (obj1.size !== obj2.size) {
+      return false;
+    }
+
+    for (const [key, val] of obj1) {
+      // 检查键是否存在
+      if (!obj2.has(key)) {
+        return false;
+      }
+
+      // 递归比较值
+      if (!isEqual(val, obj2.get(key))) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // 处理Set对象
+  if (obj1 instanceof Set && obj2 instanceof Set) {
+    if (obj1.size !== obj2.size) {
+      return false;
+    }
+
+    // 将Set转换为数组进行比较
+    const arr1 = Array.from(obj1);
+    const arr2 = Array.from(obj2);
+
+    // 简单比较（如果元素是基本类型）
+    if (arr1.every(item => typeof item !== 'object' || item === null)) {
+      return arr1.every(item => obj2.has(item));
+    }
+
+    // 复杂比较（如果元素是对象）
+    return arr1.every(item1 => arr2.some(item2 => isEqual(item1, item2)));
+  }
+
   // 处理数组
   if (Array.isArray(obj1) && Array.isArray(obj2)) {
     if (obj1.length !== obj2.length) {
@@ -304,6 +354,12 @@ export function isEqual(obj1: unknown, obj2: unknown): boolean {
     return false;
   }
 
+  // 处理Error对象
+  if (obj1 instanceof Error && obj2 instanceof Error) {
+    return obj1.name === obj2.name && obj1.message === obj2.message;
+  }
+
+  // 处理普通对象
   const keys1 = Object.keys(obj1);
   const keys2 = Object.keys(obj2);
 
