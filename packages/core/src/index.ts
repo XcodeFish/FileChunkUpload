@@ -10,6 +10,10 @@ export * from './adapters';
 // 导出事件系统
 export * from './events';
 
+// 导出开发者模式
+import devMode, { DeveloperMode, Logger, PluginTracer } from './developer-mode';
+export { DeveloperMode, Logger, PluginTracer, devMode as developerMode };
+
 // 重新导出类型定义（从types包）
 export * from '@file-chunk-uploader/types';
 
