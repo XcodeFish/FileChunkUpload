@@ -1,18 +1,18 @@
 {
   "name": "file-chunk-uploader-vanilla-example",
+  "version": "0.1.0",
+  "description": "A minimal example of file-chunk-uploader with vanilla JavaScript",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
+    "start": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
-  "devDependencies": {
-    "vite": "^4.4.9"
-  },
   "dependencies": {
     "@file-chunk-uploader/core": "workspace:*",
-    "@file-chunk-uploader/vanilla": "workspace:*"
+    "@file-chunk-uploader/types": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^4.3.9"
   }
 }
