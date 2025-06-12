@@ -24,6 +24,9 @@
   ],
   "author": "",
   "license": "MIT",
+  "dependencies": {
+    "@file-chunk-uploader/types": "^0.1.0"
+  },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^24.0.1",
     "@rollup/plugin-node-resolve": "^15.0.1",

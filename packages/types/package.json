@@ -1,0 +1,45 @@
+{
+  "name": "@file-chunk-uploader/types",
+  "version": "0.1.0",
+  "description": "TypeScript类型定义 - 大文件分片上传库类型系统",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "clean": "rimraf dist",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "prepublishOnly": "npm run build",
+    "test": "jest"
+  },
+  "keywords": [
+    "file-upload",
+    "chunk-upload",
+    "typescript",
+    "types",
+    "file-chunk-uploader"
+  ],
+  "author": "",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@rollup/plugin-typescript": "^11.1.5",
+    "rollup": "^3.15.0",
+    "typescript": "^5.2.2",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^5.0.0",
+    "@typescript-eslint/parser": "^5.0.0",
+    "rimraf": "^4.0.0",
+    "rollup-plugin-dts": "^5.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0"
+  }
+}

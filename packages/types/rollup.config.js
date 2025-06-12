@@ -1,14 +1,10 @@
 import { readFileSync } from 'fs';
 
-import commonjs from '@rollup/plugin-commonjs';
-import resolve from '@rollup/plugin-node-resolve';
-import terser from '@rollup/plugin-terser';
 import typescript from '@rollup/plugin-typescript';
 
 // 使用Node.js的fs模块读取package.json
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
-/** @type {import('rollup').RollupOptions} */
 export default {
   input: 'src/index.ts',
   output: [
@@ -24,18 +20,11 @@ export default {
     },
   ],
   plugins: [
-    // Resolve node_modules
-    resolve(),
-    // Convert CommonJS modules to ES6
-    commonjs(),
-    // Compile TypeScript
     typescript({
       tsconfig: './tsconfig.json',
       declaration: true,
       declarationDir: './dist',
+      rootDir: './src',
     }),
-    // Minify for production
-    terser(),
   ],
-  external: ['@file-chunk-uploader/types'], // 添加types包为外部依赖
 };

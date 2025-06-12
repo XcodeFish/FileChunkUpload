@@ -21,5 +21,47 @@
     "clean": {
       "cache": false
     }
+  },
+  "globalEnv": ["NODE_ENV"],
+  "packages": {
+    "packages/types": {
+      "dependsOn": []
+    },
+    "packages/core": {
+      "dependsOn": ["packages/types"]
+    },
+    "packages/utils": {
+      "dependsOn": ["packages/types"]
+    },
+    "packages/errors": {
+      "dependsOn": ["packages/types", "packages/utils"]
+    },
+    "packages/chunk": {
+      "dependsOn": ["packages/types", "packages/core"]
+    },
+    "packages/resume": {
+      "dependsOn": ["packages/types", "packages/core", "packages/chunk"]
+    },
+    "packages/network": {
+      "dependsOn": ["packages/types", "packages/core"]
+    },
+    "packages/standard": {
+      "dependsOn": [
+        "packages/core",
+        "packages/chunk",
+        "packages/resume",
+        "packages/network",
+        "packages/errors"
+      ]
+    },
+    "packages/react": {
+      "dependsOn": ["packages/standard"]
+    },
+    "packages/vue": {
+      "dependsOn": ["packages/standard"]
+    },
+    "packages/vanilla": {
+      "dependsOn": ["packages/standard"]
+    }
   }
 }
