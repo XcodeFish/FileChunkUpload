@@ -159,6 +159,9 @@ importers:
       '@file-chunk-uploader/types':
         specifier: ^0.1.0
         version: link:../types
+      '@file-chunk-uploader/utils':
+        specifier: ^0.1.0
+        version: link:../utils
     devDependencies:
       '@rollup/plugin-commonjs':
         specifier: ^24.0.1

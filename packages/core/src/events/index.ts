@@ -22,7 +22,11 @@
 import { IEventEmitter, NamespacedEvent, IHook, Namespace } from '@file-chunk-uploader/types';
 
 import { EventBus } from './event-bus';
+import { EventEmitter } from './event-emitter';
 import { Hook } from './hooks';
+
+// 导出核心类
+export { EventBus, EventEmitter, Hook };
 
 /**
  * 创建全局事件总线实例

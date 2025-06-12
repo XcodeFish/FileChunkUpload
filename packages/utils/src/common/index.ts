@@ -2,6 +2,9 @@
  * 通用工具函数集
  */
 
+// 导出文件相关工具函数
+export * from './file';
+
 /**
  * 生成唯一ID
  * @param prefix ID前缀

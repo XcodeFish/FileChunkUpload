@@ -1,5 +1,12 @@
-// 此文件作为core模块的入口
-// 实际开发时会导出core模块的所有组件
+/**
+ * 核心模块入口
+ * 导出核心功能组件
+ */
+import { getDefaultConfig } from './config';
+import { FileUploader } from './file-uploader';
+import { UploaderTask } from './uploader-task';
 
-// 占位导出，防止lint错误
-export const coreModulePlaceholder = true;
+export { FileUploader, UploaderTask, getDefaultConfig };
+
+// 默认导出FileUploader类
+export default FileUploader;

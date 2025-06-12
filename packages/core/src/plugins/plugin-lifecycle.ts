@@ -24,7 +24,12 @@ export type HookResultMergeStrategy = 'object-merge' | 'array-concat' | 'last-wi
 /**
  * 钩子处理函数类型
  */
-export type HookFunction = (...args: any[]) => any;
+export type HookFunction = (...args: unknown[]) => unknown;
+
+/**
+ * 钩子结果合并处理函数类型
+ */
+export type HookResultMergeHandler = (results: unknown[]) => unknown;
 
 /**
  * 钩子执行超时配置
@@ -90,7 +95,7 @@ export class PluginLifecycleManager {
   };
 
   /** 自定义合并策略 */
-  private customMergeHandlers: Record<string, (results: any[]) => any> = {};
+  private customMergeHandlers: Record<string, HookResultMergeHandler> = {};
 
   /**
    * 创建插件生命周期管理器实例
@@ -132,7 +137,7 @@ export class PluginLifecycleManager {
   public setHookMergeStrategy(
     hookName: string,
     strategy: HookResultMergeStrategy,
-    customHandler?: (results: any[]) => any,
+    customHandler?: HookResultMergeHandler,
   ): void {
     this.hookMergeStrategies[hookName] = strategy;
 
@@ -336,7 +341,7 @@ export class PluginLifecycleManager {
           );
 
           // 执行钩子
-          result = await hookPromise;
+          result = (await hookPromise) as T;
         } catch (err) {
           this.logger.error(
             'plugin',
@@ -472,7 +477,7 @@ export class PluginLifecycleManager {
     eventEmitter: IEventEmitter,
     args: unknown[],
   ): Promise<T> {
-    const hookResults: any[] = [];
+    const hookResults: unknown[] = [];
     const hookPromises: Promise<void>[] = [];
 
     for (const plugin of plugins) {
@@ -547,11 +552,11 @@ export class PluginLifecycleManager {
    * 合并钩子结果
    * @param hookName 钩子名称
    * @param initialValue 初始值
-   * @param results 各插件执行结果
+   * @param results 结果数组
    * @returns 合并后的结果
    * @private
    */
-  private mergeHookResults<T>(hookName: string, initialValue: T, results: any[]): T {
+  private mergeHookResults<T>(hookName: string, initialValue: T, results: unknown[]): T {
     // 如果没有结果，直接返回初始值
     if (results.length === 0) {
       return initialValue;
@@ -560,40 +565,70 @@ export class PluginLifecycleManager {
     // 获取合并策略
     const strategy = this.hookMergeStrategies[hookName] || 'last-wins';
 
+    // 根据策略合并结果
     switch (strategy) {
-      case 'object-merge':
-        // 对象合并策略
-        if (typeof initialValue === 'object' && initialValue !== null) {
-          return results.reduce((merged, current) => {
-            return { ...merged, ...current };
-          }, initialValue);
-        }
-        return results[results.length - 1];
-
-      case 'array-concat':
-        // 数组连接策略
-        if (Array.isArray(initialValue)) {
-          return results.reduce((merged, current) => {
-            return Array.isArray(current) ? [...merged, ...current] : merged;
-          }, initialValue);
-        }
-        return results[results.length - 1];
-
-      case 'last-wins':
-        // 最后胜出策略
-        return results[results.length - 1];
-
-      case 'custom': {
-        // 自定义合并策略
-        const customHandler = this.customMergeHandlers[hookName];
-        if (customHandler) {
-          return customHandler(results);
-        }
-        return results[results.length - 1];
+      case 'last-wins': {
+        // 使用最后一个结果
+        const lastResult = results[results.length - 1];
+        return lastResult as T;
       }
 
-      default:
-        return results[results.length - 1];
+      case 'object-merge': {
+        // 将所有结果合并为一个对象
+        if (typeof initialValue === 'object' && initialValue !== null) {
+          // 转换为Record类型并创建初始对象的副本
+          const initialAsObj = initialValue as Record<string, unknown>;
+          const initialCopy = Object.assign({}, initialAsObj);
+
+          // 合并所有结果
+          const mergedResult = results.reduce((merged, result) => {
+            if (typeof result === 'object' && result !== null) {
+              return Object.assign({}, merged, result as Record<string, unknown>);
+            }
+            return merged;
+          }, initialCopy);
+
+          return mergedResult as unknown as T;
+        }
+        const lastResult = results[results.length - 1];
+        return lastResult as T;
+      }
+
+      case 'array-concat': {
+        // 将所有结果连接为一个数组
+        if (Array.isArray(initialValue)) {
+          const resultArray = [...initialValue];
+
+          for (const result of results) {
+            if (Array.isArray(result)) {
+              resultArray.push(...result);
+            } else {
+              resultArray.push(result);
+            }
+          }
+
+          return resultArray as unknown as T;
+        }
+        const lastResult = results[results.length - 1];
+        return lastResult as T;
+      }
+
+      case 'custom': {
+        // 使用自定义处理函数
+        const customHandler = this.customMergeHandlers[hookName];
+        if (customHandler) {
+          const customResult = customHandler(results);
+          return customResult as T;
+        }
+        const lastResult = results[results.length - 1];
+        return lastResult as T;
+      }
+
+      default: {
+        // 默认使用最后一个结果
+        const lastResult = results[results.length - 1];
+        return lastResult as T;
+      }
     }
   }
 }

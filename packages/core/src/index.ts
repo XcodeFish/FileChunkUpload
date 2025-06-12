@@ -1,5 +1,5 @@
 // 导出核心模块
-// export * from './core';
+export * from './core';
 
 // 导出策略模块
 export * from './strategies';
@@ -40,6 +40,9 @@ export type {
 
 // 重新导出类型定义（从types包）
 export * from '@file-chunk-uploader/types';
+
+// 重新导出常用工具函数（从utils包）
+export { generateFileId, calculateSpeed } from '@file-chunk-uploader/utils';
 
 // 版本信息
 export const VERSION = '1.0.0';

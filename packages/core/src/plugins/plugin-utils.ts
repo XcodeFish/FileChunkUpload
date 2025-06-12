@@ -89,10 +89,19 @@ export function compareSemVer(version1: string, version2: string): number {
 export function isVersionCompatible(
   currentVersion: string,
   targetVersion: string,
-  compatMode: 'major' | 'minor' | 'patch' = 'minor',
+  compatMode: 'exact' | 'major' | 'minor' | 'patch' = 'minor',
 ): boolean {
   const current = parseSemVer(currentVersion);
   const target = parseSemVer(targetVersion);
+
+  // 精确匹配所有版本号
+  if (compatMode === 'exact') {
+    return (
+      current.major === target.major &&
+      current.minor === target.minor &&
+      current.patch === target.patch
+    );
+  }
 
   // 主版本号必须匹配
   if (compatMode === 'major') {
@@ -169,27 +178,47 @@ export function detectPluginConflict(
 }
 
 /**
- * 从插件元数据中提取API要求
- * @param plugin 插件实例
- * @returns API版本要求
+ * 插件API版本需求
  */
-export function getPluginApiRequirement(plugin: IPlugin): {
+interface PluginApiRequirement {
+  /** API版本 */
   version: string;
-  mode: 'major' | 'minor' | 'patch';
-} {
-  // 尝试从不同属性中获取API版本要求
+  /** 兼容模式 */
+  mode: 'exact' | 'major' | 'minor' | 'patch';
+}
+
+/**
+ * 需要API版本兼容性的插件接口
+ */
+interface IPluginWithApiInfo extends IPlugin {
+  apiVersion?: string;
+  apiRequirement?: string;
+  compatibleWith?: string;
+  apiCompatMode?: 'exact' | 'major' | 'minor' | 'patch';
+  dependencies?: Array<{ name: string; version?: string }>;
+}
+
+/**
+ * 获取插件API版本需求
+ * @param plugin 插件实例
+ * @returns API版本需求对象
+ */
+export function getPluginApiRequirement(plugin: IPlugin): PluginApiRequirement {
+  const pluginWithApi = plugin as IPluginWithApiInfo;
+
+  // 获取API版本需求
   const apiVersion =
-    (plugin as any).apiVersion ||
-    (plugin as any).apiRequirement ||
-    (plugin as any).compatibleWith ||
+    pluginWithApi.apiVersion ||
+    pluginWithApi.apiRequirement ||
+    pluginWithApi.compatibleWith ||
     '1.0.0';
 
-  // 尝试获取兼容模式
-  const apiCompat = (plugin as any).apiCompatMode || 'minor';
+  // 获取兼容模式
+  const apiCompat = pluginWithApi.apiCompatMode || 'minor';
 
   return {
     version: apiVersion,
-    mode: apiCompat as 'major' | 'minor' | 'patch',
+    mode: apiCompat as 'exact' | 'major' | 'minor' | 'patch',
   };
 }
 
@@ -228,9 +257,10 @@ export function analyzePluginRelationships(plugins: IPlugin[]): {
     }
 
     // 收集依赖关系
-    const pluginDeps = (plugins[i] as any).dependencies || [];
+    const pluginWithApi = plugins[i] as IPluginWithApiInfo;
+    const pluginDeps = pluginWithApi.dependencies || [];
     if (pluginDeps.length > 0) {
-      dependencies.set(plugins[i].name, new Set(pluginDeps));
+      dependencies.set(plugins[i].name, new Set(pluginDeps.map(dep => dep.name)));
     }
   }
 
