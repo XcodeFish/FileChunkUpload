@@ -49,10 +49,15 @@ describe('FileUploader', () => {
   });
 
   test('应该能够监听事件', done => {
-    // 模拟上传方法
-    const originalUpload = fileUploader.upload;
-    fileUploader.upload = jest.fn().mockResolvedValue({
-      success: true,
+    // 注册事件监听器
+    fileUploader.on(EventName.FILE_ADDED, event => {
+      expect(event.file).toBeDefined();
+      expect(event.file.name).toBe('test.txt');
+      done();
+    });
+
+    // 直接通过eventEmitter触发事件
+    fileUploader.eventEmitter.emit(EventName.FILE_ADDED, {
       file: {
         id: '123',
         name: 'test.txt',
@@ -60,16 +65,6 @@ describe('FileUploader', () => {
         type: mockFile.type,
       },
     });
-
-    fileUploader.on(EventName.FILE_ADDED, event => {
-      expect(event.file).toBeDefined();
-      done();
-    });
-
-    fileUploader.upload(mockFile);
-
-    // 恢复原来的方法
-    fileUploader.upload = originalUpload;
   });
 
   test('应该能够获取当前状态', () => {
