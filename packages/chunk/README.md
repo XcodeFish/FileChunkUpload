@@ -60,6 +60,50 @@ uploader.upload(file).then(result => {
 });
 ```
 
+### 高级插件配置
+
+```typescript
+// 使用高级配置和自定义钩子
+uploader.use(
+  chunkPlugin({
+    // 基础配置
+    chunkSize: 2 * 1024 * 1024,
+    concurrency: 3,
+
+    // 高级配置
+    sequential: true, // 按顺序上传分片
+    chunkSizeStrategy: 'adaptive', // 自适应分片大小
+    devMode: true, // 启用开发者模式
+
+    // 自定义钩子
+    hooks: {
+      // 分片创建前钩子 - 可以动态调整分片大小
+      beforeCreateChunks: (file, chunkSize) => {
+        // 对大文件使用更大的分片
+        if (file.size > 100 * 1024 * 1024) {
+          // 100MB
+          return 5 * 1024 * 1024; // 使用5MB分片
+        }
+        return chunkSize; // 保持默认分片大小
+      },
+
+      // 分片创建后钩子 - 可以处理或过滤分片
+      afterCreateChunks: (chunks, file) => {
+        console.log(`文件 ${file.name} 被分成了 ${chunks.length} 个分片`);
+        // 可以在这里添加额外处理逻辑
+        return chunks;
+      },
+
+      // 合并前钩子 - 可以执行合并前准备操作
+      beforeMergeChunks: async (fileId, chunkCount) => {
+        console.log(`准备合并文件 ${fileId} 的 ${chunkCount} 个分片`);
+        // 可以在合并前执行自定义操作
+      },
+    },
+  }),
+);
+```
+
 ### 直接使用分片策略
 
 ```typescript
@@ -269,3 +313,39 @@ interface ChunkConfig {
   mergeUrl?: string; // 默认: ${target}/merge
 }
 ```
+
+## 交付物
+
+- **分片上传API文档**: [详细API文档](./docs/api.md)
+- **分片上传单元测试**: `src/__tests__/` 目录下的测试文件
+- **分片上传示例**: [示例应用](./examples/)
+
+## 开发
+
+```bash
+# 安装依赖
+pnpm install
+
+# 构建
+pnpm build
+
+# 运行测试
+pnpm test
+```
+
+## 示例
+
+查看 [示例目录](./examples/) 中的示例应用，了解更多使用方法。
+
+## 设计理念
+
+@file-chunk-uploader/chunk 插件基于插件化微包架构设计，专注于提供高性能、可靠的文件分片上传功能。该插件：
+
+1. 与上传核心解耦，通过插件接口集成
+2. 提供灵活的配置选项和自定义钩子
+3. 支持完整的日志记录和调试功能
+4. 易于与其他插件（如断点续传、网络适配器等）协同工作
+
+## 许可证
+
+MIT

@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>分片上传示例</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+
+    h1,
+    h2 {
+      color: #333;
+    }
+
+    .upload-container {
+      border: 2px dashed #ccc;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      margin: 20px 0;
+      transition: all 0.3s;
+    }
+
+    .upload-container:hover,
+    .drag-over {
+      border-color: #0066ff;
+      background-color: #f0f8ff;
+    }
+
+    .btn {
+      background-color: #0066ff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 10px 0;
+      transition: background-color 0.3s;
+    }
+
+    .btn:hover {
+      background-color: #0055dd;
+    }
+
+    .btn:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+
+    .progress-container {
+      margin-top: 20px;
+    }
+
+    .progress {
+      height: 20px;
+      background-color: #f0f0f0;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background-color: #0066ff;
+      width: 0;
+      transition: width 0.3s;
+    }
+
+    .file-info {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #f5f5f5;
+      border-radius: 4px;
+    }
+
+    .log-container {
+      margin-top: 20px;
+      background-color: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      height: 200px;
+      overflow-y: auto;
+    }
+
+    .log-entry {
+      margin: 5px 0;
+      font-family: monospace;
+    }
+
+    .log-info {
+      color: #0066cc;
+    }
+
+    .log-warn {
+      color: #ff9900;
+    }
+
+    .log-error {
+      color: #cc0000;
+    }
+
+    .config-panel {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #eee;
+      border-radius: 4px;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>分片上传示例</h1>
+  <p>本示例展示了使用 @file-chunk-uploader/chunk 包进行大文件分片上传的基本功能。</p>
+
+  <!-- 配置面板 -->
+  <div class="config-panel">
+    <h2>上传配置</h2>
+    <div class="form-group">
+      <label for="chunkSize">分片大小 (MB)</label>
+      <input type="number" id="chunkSize" value="2" min="0.5" max="10" step="0.5">
+    </div>
+
+    <div class="form-group">
+      <label for="concurrency">并发数</label>
+      <input type="number" id="concurrency" value="3" min="1" max="10">
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input type="checkbox" id="sequential"> 按顺序上传
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label for="strategy">分片策略</label>
+      <select id="strategy">
+        <option value="fixed">固定大小</option>
+        <option value="adaptive">自适应大小</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input type="checkbox" id="devMode" checked> 开发者模式
+      </label>
+    </div>
+  </div>
+
+  <!-- 文件选择和上传区域 -->
+  <div class="upload-container" id="dropArea">
+    <p>拖拽文件到此处，或</p>
+    <input type="file" id="fileInput" style="display: none;">
+    <button class="btn" id="selectButton">选择文件</button>
+  </div>
+
+  <!-- 文件信息 -->
+  <div class="file-info" id="fileInfo" style="display: none;">
+    <h2>文件信息</h2>
+    <p>名称: <span id="fileName"></span></p>
+    <p>大小: <span id="fileSize"></span></p>
+    <p>类型: <span id="fileType"></span></p>
+    <p>分片数: <span id="chunkCount">0</span></p>
+  </div>
+
+  <!-- 上传进度 -->
+  <div class="progress-container" style="display: none;" id="progressContainer">
+    <h2>上传进度</h2>
+    <div class="progress">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <p><span id="progressText">0%</span> - <span id="uploadSpeed">0 KB/s</span></p>
+    <p>预计剩余时间: <span id="remainingTime">计算中...</span></p>
+  </div>
+
+  <!-- 上传控制 -->
+  <div>
+    <button class="btn" id="uploadButton" disabled>开始上传</button>
+    <button class="btn" id="pauseButton" disabled>暂停</button>
+    <button class="btn" id="resumeButton" disabled>继续</button>
+    <button class="btn" id="cancelButton" disabled>取消</button>
+  </div>
+
+  <!-- 日志区域 -->
+  <div class="log-container" id="logContainer">
+    <div class="log-entry log-info">准备就绪，请选择文件...</div>
+  </div>
+
+  <!-- 引入库 -->
+  <script src="https://cdn.jsdelivr.net/npm/@file-chunk-uploader/core/dist/file-chunk-uploader-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@file-chunk-uploader/chunk/dist/file-chunk-uploader-chunk.min.js"></script>
+
+  <script>
+    // 获取DOM元素
+    const dropArea = document.getElementById('dropArea')
+    const fileInput = document.getElementById('fileInput')
+    const selectButton = document.getElementById('selectButton')
+    const uploadButton = document.getElementById('uploadButton')
+    const pauseButton = document.getElementById('pauseButton')
+    const resumeButton = document.getElementById('resumeButton')
+    const cancelButton = document.getElementById('cancelButton')
+    const fileInfo = document.getElementById('fileInfo')
+    const fileName = document.getElementById('fileName')
+    const fileSize = document.getElementById('fileSize')
+    const fileType = document.getElementById('fileType')
+    const chunkCount = document.getElementById('chunkCount')
+    const progressContainer = document.getElementById('progressContainer')
+    const progressBar = document.getElementById('progressBar')
+    const progressText = document.getElementById('progressText')
+    const uploadSpeed = document.getElementById('uploadSpeed')
+    const remainingTime = document.getElementById('remainingTime')
+    const logContainer = document.getElementById('logContainer')
+
+    // 获取配置表单元素
+    const chunkSizeInput = document.getElementById('chunkSize')
+    const concurrencyInput = document.getElementById('concurrency')
+    const sequentialInput = document.getElementById('sequential')
+    const strategySelect = document.getElementById('strategy')
+    const devModeInput = document.getElementById('devMode')
+
+    // 全局变量
+    let currentFile = null
+    let uploader = null
+    let uploadStartTime = 0
+    let lastUploadedBytes = 0
+    let speedUpdateInterval = null
+
+    // 格式化文件大小
+    function formatSize (bytes)
+    {
+      if (bytes === 0) return '0 Bytes'
+      const k = 1024
+      const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
+      const i = Math.floor(Math.log(bytes) / Math.log(k))
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+    }
+
+    // 添加日志
+    function addLog (message, type = 'info')
+    {
+      const logEntry = document.createElement('div')
+      logEntry.className = 'log-entry log-' + type
+      logEntry.textContent = message
+      logContainer.appendChild(logEntry)
+      logContainer.scrollTop = logContainer.scrollHeight
+    }
+
+    // 初始化上传器
+    function initUploader ()
+    {
+      // 获取配置
+      const chunkSize = parseFloat(chunkSizeInput.value) * 1024 * 1024
+      const concurrency = parseInt(concurrencyInput.value)
+      const sequential = sequentialInput.checked
+      const strategy = strategySelect.value
+      const devMode = devModeInput.checked
+
+      // 创建上传器
+      uploader = new FileChunkUploader.FileUploader({
+        target: 'https://httpbin.org/post', // 模拟上传端点
+      })
+
+      // 使用分片上传插件
+      uploader.use(
+        FileChunkUploader.chunkPlugin({
+          chunkSize: chunkSize,
+          concurrency: concurrency,
+          sequential: sequential,
+          chunkSizeStrategy: strategy,
+          devMode: devMode,
+          hooks: {
+            beforeCreateChunks: (file, chunkSize) =>
+            {
+              addLog(`准备将文件分片，初始分片大小: ${formatSize(chunkSize)}`)
+              return chunkSize
+            },
+            afterCreateChunks: (chunks, file) =>
+            {
+              addLog(`文件已分为 ${chunks.length} 个分片`)
+              chunkCount.textContent = chunks.length
+              return chunks
+            },
+            beforeMergeChunks: (fileId, count) =>
+            {
+              addLog(`准备合并 ${count} 个分片`)
+            }
+          }
+        })
+      )
+
+      // 监听上传事件
+      uploader.on('upload:start', (fileInfo) =>
+      {
+        addLog(`开始上传文件: ${fileInfo.name}`)
+        uploadStartTime = Date.now()
+        lastUploadedBytes = 0
+
+        // 启动速度计算定时器
+        clearInterval(speedUpdateInterval)
+        speedUpdateInterval = setInterval(updateSpeed, 1000)
+
+        pauseButton.disabled = false
+        cancelButton.disabled = false
+        uploadButton.disabled = true
+      })
+
+      uploader.on('upload:progress', (info) =>
+      {
+        const percent = info.percentage
+        progressBar.style.width = percent + '%'
+        progressText.textContent = percent + '%'
+      })
+
+      uploader.on('upload:success', (result) =>
+      {
+        addLog(`上传成功！服务器返回: ${JSON.stringify(result)}`, 'info')
+        pauseButton.disabled = true
+        resumeButton.disabled = true
+        cancelButton.disabled = true
+        uploadButton.disabled = false
+        clearInterval(speedUpdateInterval)
+      })
+
+      uploader.on('upload:error', (error) =>
+      {
+        addLog(`上传失败: ${error.message}`, 'error')
+        pauseButton.disabled = true
+        resumeButton.disabled = false
+        cancelButton.disabled = false
+        clearInterval(speedUpdateInterval)
+      })
+
+      uploader.on('upload:pause', () =>
+      {
+        addLog(`上传已暂停`)
+        pauseButton.disabled = true
+        resumeButton.disabled = false
+      })
+
+      uploader.on('upload:resume', () =>
+      {
+        addLog(`上传已继续`)
+        resumeButton.disabled = true
+        pauseButton.disabled = false
+      })
+
+      uploader.on('upload:cancel', () =>
+      {
+        addLog(`上传已取消`)
+        pauseButton.disabled = true
+        resumeButton.disabled = true
+        cancelButton.disabled = true
+        uploadButton.disabled = false
+        clearInterval(speedUpdateInterval)
+      })
+
+      uploader.on('chunk:created', (count) =>
+      {
+        addLog(`已创建 ${count} 个分片`)
+      })
+
+      uploader.on('chunk:uploaded', (index, total) =>
+      {
+        addLog(`分片 ${index + 1}/${total} 上传完成`)
+      })
+
+      return uploader
+    }
+
+    // 更新上传速度和剩余时间
+    function updateSpeed ()
+    {
+      if (!currentFile || !uploader) return
+
+      const uploadedBytes = uploader.getProgress() * currentFile.size / 100
+      const elapsed = (Date.now() - uploadStartTime) / 1000 // 秒
+      const bytesPerSecond = uploadedBytes / elapsed
+
+      // 计算瞬时速度
+      const instantSpeed = (uploadedBytes - lastUploadedBytes) / 1
+      lastUploadedBytes = uploadedBytes
+
+      // 更新速度显示
+      const speedText = formatSize(instantSpeed) + '/s'
+      uploadSpeed.textContent = speedText
+
+      // 计算剩余时间
+      if (instantSpeed > 0) {
+        const remaining = (currentFile.size - uploadedBytes) / instantSpeed
+        remainingTime.textContent = formatTime(remaining)
+      }
+    }
+
+    // 格式化时间
+    function formatTime (seconds)
+    {
+      if (isNaN(seconds) || !isFinite(seconds)) return '计算中...'
+
+      seconds = Math.round(seconds)
+      let minutes = Math.floor(seconds / 60)
+      seconds = seconds % 60
+      let hours = Math.floor(minutes / 60)
+      minutes = minutes % 60
+
+      const parts = []
+      if (hours > 0) parts.push(`${hours}小时`)
+      if (minutes > 0) parts.push(`${minutes}分钟`)
+      if (seconds > 0 || parts.length === 0) parts.push(`${seconds}秒`)
+
+      return parts.join(' ')
+    }
+
+    // 处理文件选择
+    function handleFileSelected (file)
+    {
+      currentFile = file
+
+      // 显示文件信息
+      fileName.textContent = file.name
+      fileSize.textContent = formatSize(file.size)
+      fileType.textContent = file.type || '未知'
+      fileInfo.style.display = 'block'
+
+      // 重置进度
+      progressBar.style.width = '0%'
+      progressText.textContent = '0%'
+      progressContainer.style.display = 'block'
+
+      // 启用上传按钮
+      uploadButton.disabled = false
+
+      addLog(`已选择文件: ${file.name} (${formatSize(file.size)})`)
+    }
+
+    // 事件监听
+    selectButton.addEventListener('click', () =>
+    {
+      fileInput.click()
+    })
+
+    fileInput.addEventListener('change', (e) =>
+    {
+      const file = e.target.files[0]
+      if (file) {
+        handleFileSelected(file)
+      }
+    })
+
+    // 拖放功能
+    dropArea.addEventListener('dragover', (e) =>
+    {
+      e.preventDefault()
+      dropArea.classList.add('drag-over')
+    })
+
+    dropArea.addEventListener('dragleave', () =>
+    {
+      dropArea.classList.remove('drag-over')
+    })
+
+    dropArea.addEventListener('drop', (e) =>
+    {
+      e.preventDefault()
+      dropArea.classList.remove('drag-over')
+
+      const file = e.dataTransfer.files[0]
+      if (file) {
+        handleFileSelected(file)
+      }
+    })
+
+    // 上传控制事件
+    uploadButton.addEventListener('click', () =>
+    {
+      if (!currentFile) return
+
+      // 初始化上传器（每次都重新初始化以应用最新配置）
+      uploader = initUploader()
+
+      // 开始上传
+      addLog(`准备上传文件...`)
+      uploader.upload(currentFile).then(result =>
+      {
+        addLog(`上传任务完成`)
+      }).catch(err =>
+      {
+        addLog(`上传过程发生错误: ${err.message}`, 'error')
+      })
+    })
+
+    pauseButton.addEventListener('click', () =>
+    {
+      if (uploader) {
+        addLog(`正在暂停...`)
+        uploader.pause()
+      }
+    })
+
+    resumeButton.addEventListener('click', () =>
+    {
+      if (uploader) {
+        addLog(`正在恢复...`)
+        uploader.resume()
+      }
+    })
+
+    cancelButton.addEventListener('click', () =>
+    {
+      if (uploader) {
+        addLog(`正在取消...`)
+        uploader.cancel()
+      }
+    })
+
+    // 页面加载完成
+    window.addEventListener('load', () =>
+    {
+      // 初始化默认上传器
+      uploader = initUploader()
+
+      addLog('分片上传示例已初始化，请选择文件')
+    });
+  </script>
+</body>
+
+</html>
