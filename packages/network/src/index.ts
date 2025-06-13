@@ -26,8 +26,10 @@ export * from './retry';
 // 导出工具函数
 export * from './utils';
 
+// 导出网络插件
+export * from './plugin';
+
 // 导出自适应网络功能
-// 注意：自适应网络模块中的NetworkDetector与detector模块中的NetworkDetector命名冲突
-// 使用命名空间导出以避免冲突
-import * as AdaptiveModule from './adaptive';
-export { AdaptiveModule };
+// 使用命名空间导出避免与detector模块中的NetworkDetector命名冲突
+import * as adaptive from './adaptive';
+export { adaptive };
