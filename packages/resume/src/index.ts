@@ -6,5 +6,5 @@
 // 导出所有存储相关组件
 export * from './storage';
 
-// TODO: 导出续传策略相关组件，待实现
-// export * from './resume-strategy';
+// 导出续传策略相关组件
+export * from './resume-strategy';

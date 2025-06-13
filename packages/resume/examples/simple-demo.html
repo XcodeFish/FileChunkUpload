@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>文件断点续传演示</title>
+  <style>
+    body {
+      font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+
+    .container {
+      background-color: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .upload-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .upload-controls button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      background-color: #4caf50;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+
+    .upload-controls button:hover {
+      background-color: #45a049;
+    }
+
+    .upload-controls button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+
+    .progress-container {
+      width: 100%;
+      background-color: #e0e0e0;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 24px;
+      background-color: #4caf50;
+      width: 0;
+      border-radius: 4px;
+      transition: width 0.3s;
+      text-align: center;
+      line-height: 24px;
+      color: white;
+      font-size: 14px;
+    }
+
+    .log-area {
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px;
+      height: 300px;
+      overflow-y: auto;
+      background-color: #f9f9f9;
+      font-family: monospace;
+      font-size: 14px;
+    }
+
+    .log-entry {
+      margin-bottom: 4px;
+      padding: 4px;
+      border-radius: 2px;
+    }
+
+    .info {
+      background-color: #e8f4f8;
+    }
+
+    .success {
+      background-color: #e8f8e8;
+      color: #2e7d32;
+    }
+
+    .error {
+      background-color: #f8e8e8;
+      color: #c62828;
+    }
+
+    .warning {
+      background-color: #fff8e1;
+      color: #f57f17;
+    }
+
+    #fileInput {
+      display: none;
+    }
+
+    .file-input-label {
+      display: inline-block;
+      padding: 8px 16px;
+      border: 1px solid #4caf50;
+      border-radius: 4px;
+      background-color: white;
+      color: #4caf50;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .file-input-label:hover {
+      background-color: #f1f8e9;
+    }
+
+    .selected-file {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #666;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    #pauseButton {
+      background-color: #ff9800;
+    }
+
+    #pauseButton:hover {
+      background-color: #f57c00;
+    }
+
+    #resumeButton {
+      background-color: #2196f3;
+    }
+
+    #resumeButton:hover {
+      background-color: #1e88e5;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>文件断点续传演示</h1>
+
+    <div class="upload-controls">
+      <label for="fileInput" class="file-input-label">选择文件</label>
+      <input type="file" id="fileInput">
+      <div class="action-buttons">
+        <button id="uploadButton" disabled>上传</button>
+        <button id="pauseButton" disabled>模拟中断</button>
+        <button id="resumeButton">恢复上传</button>
+      </div>
+    </div>
+
+    <div id="selectedFile" class="selected-file"></div>
+
+    <div class="progress-container">
+      <div id="progressBar" class="progress-bar">0%</div>
+    </div>
+
+    <div id="logArea" class="log-area"></div>
+  </div>
+
+  <script>
+    // EventEmitter 简单实现
+    class EventEmitter
+    {
+      constructor()
+      {
+        this.events = {}
+      }
+
+      on (event, listener)
+      {
+        if (!this.events[event]) {
+          this.events[event] = []
+        }
+        this.events[event].push(listener)
+        return this
+      }
+
+      emit (event, ...args)
+      {
+        if (this.events[event]) {
+          this.events[event].forEach(listener =>
+          {
+            listener.apply(this, args)
+          })
+        }
+        return this
+      }
+
+      off (event, listener)
+      {
+        if (this.events[event]) {
+          this.events[event] = this.events[event].filter(l => l !== listener)
+        }
+        return this
+      }
+    }
+
+    // 分片状态枚举
+    const ChunkStatus = {
+      PENDING: 0,    // 等待上传
+      UPLOADING: 1,  // 上传中
+      SUCCESS: 2,    // 上传成功 
+      FAILED: 3,     // 上传失败
+      PAUSED: 4,     // 已暂停
+    }
+
+    // 存储管理器
+    class StorageManager
+    {
+      constructor(dbName, storeName, version = 1)
+      {
+        this.dbName = dbName
+        this.storeName = storeName
+        this.version = version
+        this.db = null
+        this._initPromise = null
+      }
+
+      async init ()
+      {
+        if (this._initPromise) {
+          return this._initPromise
+        }
+
+        this._initPromise = new Promise((resolve, reject) =>
+        {
+          const request = indexedDB.open(this.dbName, this.version)
+
+          request.onupgradeneeded = (event) =>
+          {
+            const db = event.target.result
+            // 修正：添加正确的键路径配置
+            if (!db.objectStoreNames.contains(this.storeName)) {
+              db.createObjectStore(this.storeName, { keyPath: 'fileId' })
+            }
+          }
+
+          request.onsuccess = (event) =>
+          {
+            this.db = event.target.result
+            resolve(this.db)
+          }
+
+          request.onerror = (event) =>
+          {
+            console.error('数据库打开失败:', event.target.error)
+            reject(event.target.error)
+          }
+        })
+
+        return this._initPromise
+      }
+
+      async saveUploadState (fileId, state)
+      {
+        const db = await this.init()
+        return new Promise((resolve, reject) =>
+        {
+          const transaction = db.transaction([this.storeName], 'readwrite')
+          const store = transaction.objectStore(this.storeName)
+
+          // 确保state包含fileId
+          const stateWithId = { ...state, fileId }
+
+          const request = store.put(stateWithId)
+
+          request.onsuccess = () => resolve()
+          request.onerror = (event) =>
+          {
+            console.error('保存上传状态失败:', event.target.error)
+            reject(event.target.error)
+          }
+        })
+      }
+
+      async getUploadState (fileId)
+      {
+        const db = await this.init()
+        return new Promise((resolve, reject) =>
+        {
+          const transaction = db.transaction([this.storeName], 'readonly')
+          const store = transaction.objectStore(this.storeName)
+          const request = store.get(fileId)
+
+          request.onsuccess = (event) =>
+          {
+            resolve(request.result)
+          }
+
+          request.onerror = (event) =>
+          {
+            console.error('获取上传状态失败:', event.target.error)
+            reject(event.target.error)
+          }
+        })
+      }
+
+      async removeUploadState (fileId)
+      {
+        const db = await this.init()
+        return new Promise((resolve, reject) =>
+        {
+          const transaction = db.transaction([this.storeName], 'readwrite')
+          const store = transaction.objectStore(this.storeName)
+          const request = store.delete(fileId)
+
+          request.onsuccess = () => resolve()
+          request.onerror = (event) =>
+          {
+            console.error('删除上传状态失败:', event.target.error)
+            reject(event.target.error)
+          }
+        })
+      }
+
+      async getAllUploadStates ()
+      {
+        const db = await this.init()
+        return new Promise((resolve, reject) =>
+        {
+          const transaction = db.transaction([this.storeName], 'readonly')
+          const store = transaction.objectStore(this.storeName)
+          const request = store.getAll()
+
+          request.onsuccess = () => resolve(request.result)
+          request.onerror = (event) =>
+          {
+            console.error('获取所有上传状态失败:', event.target.error)
+            reject(event.target.error)
+          }
+        })
+      }
+
+      async close ()
+      {
+        if (this.db) {
+          this.db.close()
+          this.db = null
+          this._initPromise = null
+        }
+      }
+    }
+
+    // 断点续传策略类
+    class ResumeUploadStrategy
+    {
+      constructor(options)
+      {
+        this.options = {
+          storage: {
+            dbName: 'resume-upload-demo',
+            storeName: 'file-uploads',
+            version: 1,
+          },
+          maxConcurrentChunks: 3,
+          ...options
+        }
+
+        this.storageManager = new StorageManager(
+          this.options.storage.dbName,
+          this.options.storage.storeName,
+          this.options.storage.version
+        )
+
+        this.eventEmitter = options.eventEmitter || new EventEmitter()
+      }
+
+      setEventEmitter (eventEmitter)
+      {
+        this.eventEmitter = eventEmitter
+      }
+
+      async getChunksDetails (fileId)
+      {
+        const state = await this.storageManager.getUploadState(fileId)
+        return state?.chunks || []
+      }
+
+      async updateChunkStatus (fileId, chunkIndex, status, errorMessage = null)
+      {
+        const state = await this.storageManager.getUploadState(fileId)
+
+        if (!state) {
+          return false
+        }
+
+        const chunks = [...state.chunks]
+
+        if (chunkIndex < 0 || chunkIndex >= chunks.length) {
+          return false
+        }
+
+        chunks[chunkIndex] = {
+          ...chunks[chunkIndex],
+          status,
+          lastUpdated: new Date().getTime()
+        }
+
+        if (errorMessage && status === ChunkStatus.FAILED) {
+          chunks[chunkIndex].errorMessage = errorMessage
+        }
+
+        await this.storageManager.saveUploadState(fileId, {
+          ...state,
+          chunks
+        })
+
+        return true
+      }
+
+      async initializeUpload (fileId, fileName, totalChunks)
+      {
+        const chunks = Array(totalChunks).fill(null).map((_, index) => ({
+          index,
+          status: ChunkStatus.PENDING,
+          lastUpdated: new Date().getTime()
+        }))
+
+        await this.storageManager.saveUploadState(fileId, {
+          fileId,
+          fileName,
+          chunks,
+          totalChunks,
+          createdAt: new Date().getTime(),
+          updatedAt: new Date().getTime()
+        })
+
+        return chunks
+      }
+
+      async completeUpload (fileId)
+      {
+        await this.storageManager.removeUploadState(fileId)
+      }
+
+      async destroy ()
+      {
+        await this.storageManager.close()
+      }
+    }
+
+    // 工具函数
+    function formatSize (bytes)
+    {
+      if (bytes === 0) return '0 Bytes'
+
+      const k = 1024
+      const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
+      const i = Math.floor(Math.log(bytes) / Math.log(k))
+
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+    }
+
+    function generateFileId (file)
+    {
+      // 使用文件名、大小和最后修改时间组合生成ID
+      const hashInput = `${file.name}-${file.size}-${file.lastModified}`
+
+      // 简单哈希函数
+      let hash = 0
+      for (let i = 0; i < hashInput.length; i++) {
+        const char = hashInput.charCodeAt(i)
+        hash = (hash << 5) - hash + char
+        hash = hash & hash // 转换为32位整数
+      }
+
+      return Math.abs(hash).toString(16)
+    }
+
+    function updateProgressBar (progress)
+    {
+      const progressBar = document.getElementById('progressBar')
+      if (progressBar) {
+        const percent = Math.round(progress)
+        progressBar.style.width = `${percent}%`
+        progressBar.textContent = `${percent}%`
+      }
+    }
+
+    function logToUI (message, type = 'info')
+    {
+      const logArea = document.getElementById('logArea')
+      if (logArea) {
+        const logEntry = document.createElement('div')
+        logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`
+        logEntry.className = `log-entry ${type}`
+        logArea.appendChild(logEntry)
+        logArea.scrollTop = logArea.scrollHeight // 自动滚动到最新日志
+      }
+    }
+
+    // 模拟上传功能
+    async function uploadChunk (chunk, index, fileId)
+    {
+      // 创建FormData
+      const formData = new FormData()
+      formData.append('chunk', chunk)
+      formData.append('index', String(index))
+      formData.append('fileId', fileId)
+
+      // 模拟上传
+      logToUI(`上传分片 ${index} (${formatSize(chunk.size)})...`)
+
+      // 模拟网络延迟
+      await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000))
+
+      // 模拟偶发性失败（仅用于演示失败恢复）
+      if (Math.random() < 0.1) {
+        throw new Error(`分片 ${index} 上传失败（模拟错误）`)
+      }
+
+      logToUI(`分片 ${index} 上传成功`, 'success')
+    }
+
+    async function mergeChunks (fileId, totalChunks)
+    {
+      logToUI(`请求服务器合并 ${totalChunks} 个分片...`)
+
+      // 模拟网络延迟
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      logToUI('文件合并成功，上传完成', 'success')
+    }
+
+    // 主要上传逻辑
+    let globalUploadAborted = false
+
+    async function processFile (file)
+    {
+      // 分片大小 1MB
+      const chunkSize = 1024 * 1024
+      const chunks = []
+
+      // 分片处理
+      for (let start = 0; start < file.size; start += chunkSize) {
+        const end = Math.min(start + chunkSize, file.size)
+        const chunk = file.slice(start, end)
+        chunks.push(chunk)
+      }
+
+      return {
+        chunks,
+        totalChunks: chunks.length,
+        chunkSize,
+      }
+    }
+
+    async function uploadRemainingChunks (resumeStrategy, fileId, chunks, uploadedChunks)
+    {
+      // 创建已上传分片集合，便于快速查找
+      const uploadedSet = new Set(uploadedChunks)
+
+      // 修复并行上传控制
+      const concurrency = 3
+      let pendingCount = 0
+      const pendingPromises = []
+
+      // 更新进度条计算基础
+      let completedChunks = uploadedChunks.length
+      const totalChunks = chunks.length
+
+      // 更新初始进度
+      updateProgressBar((completedChunks / totalChunks) * 100)
+
+      // 同步版本的Promise处理函数
+      async function uploadWithConcurrencyControl ()
+      {
+        for (let i = 0; i < chunks.length; i++) {
+          // 检查是否中止上传
+          if (globalUploadAborted) {
+            throw new Error('上传已中止')
+          }
+
+          // 跳过已上传的分片
+          if (uploadedSet.has(i)) {
+            logToUI(`分片 ${i} 已上传，跳过`)
+            continue
+          }
+
+          // 等待队列中有空位
+          while (pendingCount >= concurrency) {
+            await Promise.race([
+              // 等待任一上传完成
+              Promise.race(pendingPromises),
+              // 或者短暂延迟后再检查
+              new Promise(resolve => setTimeout(resolve, 100))
+            ])
+
+            // 清理完成的Promise
+            for (let j = pendingPromises.length - 1; j >= 0; j--) {
+              if (pendingPromises[j].isFulfilled) {
+                pendingPromises.splice(j, 1)
+                pendingCount--
+              }
+            }
+          }
+
+          // 上传当前分片
+          const uploadPromise = (async (index) =>
+          {
+            try {
+              await uploadChunk(chunks[index], index, fileId)
+
+              // 标记Promise已完成
+              uploadPromise.isFulfilled = true
+
+              // 保存上传进度
+              await resumeStrategy.updateChunkStatus(fileId, index, ChunkStatus.SUCCESS)
+
+              // 更新进度条
+              completedChunks++
+              updateProgressBar((completedChunks / totalChunks) * 100)
+
+              return index
+            } catch (error) {
+              // 标记Promise已完成
+              uploadPromise.isFulfilled = true
+
+              // 记录失败
+              logToUI(`分片 ${index} 上传失败: ${error.message}`, 'error')
+              await resumeStrategy.updateChunkStatus(fileId, index, ChunkStatus.FAILED, error.message)
+
+              // 抛出错误，但不影响其他分片上传
+              throw error
+            }
+          })(i)
+
+          // 添加自定义属性
+          uploadPromise.isFulfilled = false
+
+          // 加入Promise队列
+          pendingPromises.push(uploadPromise)
+          pendingCount++
+        }
+
+        // 等待所有分片上传完成或失败
+        await Promise.allSettled(pendingPromises)
+      }
+
+      // 执行上传
+      await uploadWithConcurrencyControl()
+
+      // 检查是否有失败的分片
+      const failedChunksDetails = await resumeStrategy.getChunksDetails(fileId)
+      const failedCount = failedChunksDetails.filter(chunk => chunk.status === ChunkStatus.FAILED).length
+
+      if (failedCount > 0) {
+        throw new Error(`${failedCount} 个分片上传失败，使用恢复按钮可以继续上传`)
+      }
+    }
+
+    // 主上传功能
+    async function demonstrateResumeUpload (file)
+    {
+      // 重置中止标志
+      globalUploadAborted = false
+
+      // 创建事件发射器
+      const myEventEmitter = new EventEmitter()
+
+      // 禁用上传按钮
+      const uploadButton = document.getElementById('uploadButton')
+      uploadButton.disabled = true
+
+      // 启用暂停按钮
+      const pauseButton = document.getElementById('pauseButton')
+      pauseButton.disabled = false
+
+      // 禁用恢复按钮
+      const resumeButton = document.getElementById('resumeButton')
+      resumeButton.disabled = true
+
+      // 创建续传策略
+      const resumeStrategy = new ResumeUploadStrategy({
+        eventEmitter: myEventEmitter
+      })
+
+      try {
+        // 生成文件ID
+        const fileId = generateFileId(file)
+        logToUI(`文件ID: ${fileId}`)
+
+        // 检查是否有已保存的上传状态
+        const state = await resumeStrategy.storageManager.getUploadState(fileId)
+
+        if (state && state.chunks && state.chunks.length > 0) {
+          // 恢复上传
+          logToUI('发现已保存的上传状态，准备恢复上传...', 'info')
+
+          // 获取上传状态
+          const uploadedChunks = state.chunks
+            .filter(chunk => chunk.status === ChunkStatus.SUCCESS)
+            .map(chunk => chunk.index)
+
+          logToUI(
+            `恢复上传 "${file.name}"，已完成: ${uploadedChunks.length}/${state.totalChunks} 分片`
+          )
+
+          // 处理文件
+          const fileInfo = await processFile(file)
+
+          // 更新进度条
+          const initialProgress = (uploadedChunks.length / fileInfo.totalChunks) * 100
+          updateProgressBar(initialProgress)
+
+          // 上传剩余分片
+          await uploadRemainingChunks(resumeStrategy, fileId, fileInfo.chunks, uploadedChunks)
+        } else {
+          // 开始新上传
+          logToUI(`开始新上传: "${file.name}" (${formatSize(file.size)})`, 'info')
+
+          // 处理文件
+          const fileInfo = await processFile(file)
+          logToUI(
+            `文件已分为 ${fileInfo.totalChunks} 个分片，每个分片大小约为 ${formatSize(
+              fileInfo.chunkSize
+            )}`
+          )
+
+          // 初始化上传状态
+          await resumeStrategy.initializeUpload(fileId, file.name, fileInfo.totalChunks)
+
+          // 上传所有分片
+          await uploadRemainingChunks(resumeStrategy, fileId, fileInfo.chunks, [])
+        }
+
+        // 完成上传，清理存储
+        await resumeStrategy.completeUpload(fileId)
+
+        // 模拟调用API合并分片
+        await mergeChunks(fileId, file.size)
+
+        // 更新UI
+        updateProgressBar(100)
+        logToUI('上传完成！', 'success')
+      } catch (error) {
+        if (globalUploadAborted) {
+          logToUI('上传已中止，可以使用"恢复上传"按钮继续', 'warning')
+        } else {
+          logToUI(`上传过程中发生错误: ${error.message}`, 'error')
+        }
+      } finally {
+        // 销毁资源
+        await resumeStrategy.destroy()
+
+        // 恢复按钮状态
+        uploadButton.disabled = false
+        pauseButton.disabled = true
+        resumeButton.disabled = false
+      }
+    }
+
+    // 初始化UI和事件处理
+    document.addEventListener('DOMContentLoaded', () =>
+    {
+      const fileInput = document.getElementById('fileInput')
+      const uploadButton = document.getElementById('uploadButton')
+      const pauseButton = document.getElementById('pauseButton')
+      const resumeButton = document.getElementById('resumeButton')
+      const selectedFileDisplay = document.getElementById('selectedFile')
+
+      // 初始化UI
+      logToUI('请选择一个文件进行上传', 'info')
+
+      // 文件选择事件
+      fileInput.addEventListener('change', () =>
+      {
+        if (fileInput.files && fileInput.files.length > 0) {
+          const file = fileInput.files[0]
+          selectedFileDisplay.textContent = `已选择: ${file.name} (${formatSize(file.size)})`
+          logToUI(`已选择文件: ${file.name} (${formatSize(file.size)})`, 'info')
+          uploadButton.disabled = false
+        }
+      })
+
+      // 上传按钮事件
+      uploadButton.addEventListener('click', async () =>
+      {
+        if (fileInput.files && fileInput.files.length > 0) {
+          const file = fileInput.files[0]
+          try {
+            await demonstrateResumeUpload(file)
+          } catch (error) {
+            logToUI(`上传失败: ${error.message}`, 'error')
+          }
+        } else {
+          logToUI('请先选择文件', 'warning')
+        }
+      })
+
+      // 暂停按钮事件
+      pauseButton.addEventListener('click', () =>
+      {
+        globalUploadAborted = true
+        logToUI('正在中止上传...', 'warning')
+        pauseButton.disabled = true
+        resumeButton.disabled = false
+      })
+
+      // 恢复按钮事件
+      resumeButton.addEventListener('click', async () =>
+      {
+        if (fileInput.files && fileInput.files.length > 0) {
+          const file = fileInput.files[0]
+          try {
+            await demonstrateResumeUpload(file)
+          } catch (error) {
+            logToUI(`恢复上传失败: ${error.message}`, 'error')
+          }
+        } else {
+          logToUI('没有文件可恢复上传', 'warning')
+        }
+      })
+    })
+  </script>
+</body>
+
+</html>

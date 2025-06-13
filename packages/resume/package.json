@@ -13,10 +13,39 @@
     "dev": "rollup -c -w",
     "lint": "eslint --ext .ts,.tsx src",
     "test": "jest",
-    "clean": "rimraf dist"
+    "test:coverage": "jest --coverage",
+    "test:watch": "jest --watch",
+    "test:skip-typecheck": "cross-env TS_JEST_DISABLE_TYPE_CHECKING=true jest",
+    "test:simple": "jest __tests__/simple.test.ts",
+    "test:resume-strategy": "jest __tests__/resume-strategy",
+    "test:storage": "jest __tests__/storage",
+    "test:ci": "jest --ci --runInBand",
+    "clean": "rm -rf dist",
+    "build:example": "webpack --config examples/webpack.config.js",
+    "serve:example": "cd examples && npx http-server -c-1",
+    "demo": "node examples/server.js"
   },
   "dependencies": {
-    "@file-chunk-uploader/core": "workspace:*"
+    "@file-chunk-uploader/core": "0.1.0",
+    "@file-chunk-uploader/types": "0.1.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^24.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-terser": "^0.4.0",
+    "@rollup/plugin-typescript": "^11.0.0",
+    "@types/jest": "^29.5.0",
+    "cross-env": "^7.0.3",
+    "fake-indexeddb": "^4.0.0",
+    "http-server": "^14.1.1",
+    "jest": "^29.5.0",
+    "jest-axe": "^7.0.0",
+    "jest-environment-jsdom": "^29.5.0",
+    "rimraf": "^4.1.2",
+    "ts-jest": "^29.1.0",
+    "ts-loader": "^9.5.2",
+    "webpack": "^5.99.9",
+    "webpack-cli": "^6.0.1"
   },
   "publishConfig": {
     "access": "public"

@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./",
+    "outDir": "./dist",
+    "composite": true,
+    "noEmit": false,
+    "types": ["jest", "node"],
+    "paths": {
+      "@file-chunk-uploader/types": ["../types/src"],
+      "@file-chunk-uploader/types/*": ["../types/src/*"],
+      "@file-chunk-uploader/*": ["../*/src"]
+    }
+  },
+  "include": ["src/**/*", "__tests__/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
+}

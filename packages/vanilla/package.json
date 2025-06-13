@@ -27,7 +27,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@file-chunk-uploader/core": "1.0.0"
+    "@file-chunk-uploader/core": "0.1.0"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^24.0.1",

@@ -1,6 +1,6 @@
 {
   "name": "@file-chunk-uploader/react",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "React适配器 - 提供React组件和Hooks",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
@@ -26,7 +26,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@file-chunk-uploader/core": "1.0.0"
+    "@file-chunk-uploader/core": "0.1.0"
   },
   "peerDependencies": {
     "react": ">=16.8.0",

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>断点续传示例</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .container {
+      border: 1px solid #ddd;
+      padding: 20px;
+      border-radius: 5px;
+    }
+
+    .progress {
+      height: 20px;
+      background-color: #f5f5f5;
+      border-radius: 5px;
+      margin: 15px 0;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background-color: #4CAF50;
+      width: 0%;
+      transition: width 0.3s;
+    }
+
+    .button {
+      background-color: #4CAF50;
+      border: none;
+      color: white;
+      padding: 10px 20px;
+      text-align: center;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .button:disabled {
+      background-color: #cccccc;
+    }
+
+    .log {
+      height: 200px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      padding: 10px;
+      margin-top: 20px;
+      font-family: monospace;
+      background-color: #f9f9f9;
+    }
+
+    .log-entry {
+      margin: 5px 0;
+      padding: 5px;
+      border-left: 4px solid #ddd;
+      font-size: 14px;
+    }
+
+    .log-entry.info {
+      border-left-color: #2196F3;
+    }
+
+    .log-entry.success {
+      border-left-color: #4CAF50;
+    }
+
+    .log-entry.warning {
+      border-left-color: #FF9800;
+    }
+
+    .log-entry.error {
+      border-left-color: #F44336;
+      color: #F44336;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>文件断点续传示例</h1>
+
+  <div class="container">
+    <h2>上传文件</h2>
+    <input type="file" id="fileInput">
+    <button id="uploadButton" class="button">开始上传</button>
+
+    <div class="progress">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <div>
+      <button id="pauseButton" class="button" disabled>暂停</button>
+      <button id="resumeButton" class="button" disabled>继续</button>
+    </div>
+
+    <div class="log" id="logArea"></div>
+  </div>
+
+  <script src="./bundle.js"></script>
+</body>
+
+</html>

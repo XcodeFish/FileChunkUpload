@@ -1,6 +1,6 @@
 {
   "name": "@file-chunk-uploader/shared",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "框架适配器共享代码",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
@@ -26,7 +26,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@file-chunk-uploader/core": "1.0.0"
+    "@file-chunk-uploader/core": "0.1.0"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^24.0.1",
