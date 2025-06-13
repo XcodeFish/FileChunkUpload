@@ -16,7 +16,9 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@file-chunk-uploader/core": "workspace:*"
+    "@file-chunk-uploader/core": "workspace:*",
+    "@file-chunk-uploader/types": "workspace:*",
+    "@file-chunk-uploader/utils": "workspace:*"
   },
   "publishConfig": {
     "access": "public"

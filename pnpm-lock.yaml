@@ -153,6 +153,9 @@ importers:
       '@file-chunk-uploader/core':
         specifier: workspace:*
         version: link:../core
+      '@file-chunk-uploader/types':
+        specifier: workspace:*
+        version: link:../types
 
   packages/core:
     dependencies:

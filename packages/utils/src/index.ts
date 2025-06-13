@@ -1,23 +1,21 @@
 /**
  * @file-chunk-uploader/utils
- * 提供文件上传工具库核心功能
+ * 通用工具库
+ *
+ * 提供文件上传库所需的各种工具函数和类
+ * @packageDocumentation
  */
 
-// 导出防抖和节流工具
-export * from './debounce';
-export * from './throttle';
+// 导出日志工具
+export * from './logger';
 
-// 导出对象操作工具
-export * from './object';
+// 导出错误处理工具
+export * from './error';
 
-// 导出格式化和转换工具
+// 导出事件工具
+export * from './event';
+
+// 导出格式化工具
 export * from './format';
 
-// 导出跨平台兼容性工具
-export * from './platform';
-
-// 导出通用工具函数
-export * from './common';
-
-// 导出动态剩余时间计算工具
-export * from './etaCalculator';
+// 其他工具函数（如果有）

@@ -1,4 +1,10 @@
 /**
+ * 格式化工具模块
+ * @module utils/format
+ */
+export * from './formatter';
+
+/**
  * 格式化和转换工具函数集
  */
 

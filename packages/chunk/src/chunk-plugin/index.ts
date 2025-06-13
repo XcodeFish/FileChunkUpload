@@ -5,4 +5,4 @@
  * TODO: 实现分片上传插件模块
  */
 
-// 暂无导出内容，后续会添加实现
+export * from './chunk-plugin';

@@ -126,6 +126,8 @@ export interface IChunkConfig {
   indexBase?: 0 | 1;
   /** 分片大小计算策略 */
   chunkSizeStrategy?: 'fixed' | 'adaptive';
+  /** 每个分片最大重试次数 */
+  maxRetries?: number;
 }
 
 /**

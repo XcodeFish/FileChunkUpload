@@ -10,7 +10,7 @@
 export * from './file-handler';
 
 // 导出分片策略模块
-// export * from './chunk-strategy';
+export * from './chunk-strategy';
 
-// // 导出分片上传插件
-// export * from './chunk-plugin';
+// 导出分片上传插件
+export * from './chunk-plugin';
