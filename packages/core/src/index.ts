@@ -42,7 +42,7 @@ export type {
 export * from '@file-chunk-uploader/types';
 
 // 重新导出常用工具函数（从utils包）
-export { generateFileId, calculateSpeed } from '@file-chunk-uploader/utils';
+export * from '@file-chunk-uploader/utils';
 
 // 版本信息
 export const VERSION = '1.0.0';

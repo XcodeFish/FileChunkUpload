@@ -18,4 +18,7 @@ export * from './event';
 // 导出格式化工具
 export * from './format';
 
+// 导出通用工具函数
+export * from './common';
+
 // 其他工具函数（如果有）

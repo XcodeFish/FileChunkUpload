@@ -2,7 +2,6 @@
  * Worker文件处理器
  * 使用Web Worker处理文件切片，提高性能
  */
-import { generateFileId } from '@file-chunk-uploader/core';
 import {
   IChunkMeta,
   IFileChunkResult,
@@ -11,6 +10,7 @@ import {
   IFileInfo,
   ILogger,
 } from '@file-chunk-uploader/types';
+import { generateFileId } from '@file-chunk-uploader/utils';
 
 import { FileHandler } from './file-handler';
 
@@ -92,7 +92,8 @@ export class WorkerFileHandler implements IFileHandler {
   private memoryUsage: number = 0;
   private memoryLimit: number =
     typeof performance !== 'undefined' && 'memory' in performance
-      ? (performance as any).memory?.jsHeapSizeLimit * 0.8 // 使用80%的堆内存上限
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (performance as any).memory?.jsHeapSizeLimit * 0.8 // 使用80%的堆内存上限
       : 1024 * 1024 * 1024; // 默认1GB
 
   /**
@@ -393,6 +394,7 @@ export class WorkerFileHandler implements IFileHandler {
     // 清除超时定时器（在messageHandler或errorHandler中）
     const originalTask = this.busyWorkers.get(worker);
     if (originalTask === task) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (worker as any)._timeoutId = timeoutId;
     }
   }
@@ -422,9 +424,11 @@ export class WorkerFileHandler implements IFileHandler {
    */
   private terminateWorker(worker: Worker): void {
     // 清除超时定时器
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const timeoutId = (worker as any)._timeoutId;
     if (timeoutId) {
       clearTimeout(timeoutId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (worker as any)._timeoutId;
     }
 

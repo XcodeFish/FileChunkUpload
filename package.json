@@ -81,5 +81,9 @@
     "*.{json,md}": [
       "prettier --write"
     ]
+  },
+  "type": "module",
+  "imports": {
+    "#config/*": "./config/*.js"
   }
 }

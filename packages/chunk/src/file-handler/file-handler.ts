@@ -2,7 +2,6 @@
  * 文件处理器实现
  * 负责文件切片和分片信息管理
  */
-import { generateFileId } from '@file-chunk-uploader/core';
 import {
   IChunkMeta,
   IFileChunkResult,
@@ -11,6 +10,7 @@ import {
   IFileInfo,
   ILogger,
 } from '@file-chunk-uploader/types';
+import { generateFileId } from '@file-chunk-uploader/utils';
 
 /**
  * 文件分片大小常量（字节）

@@ -3,7 +3,6 @@
  * 负责协调分片上传流程
  * @module chunk-strategy/chunk-upload-coordinator
  */
-import { generateFileId } from '@file-chunk-uploader/core';
 import {
   IChunkConfig,
   IEventEmitter,
@@ -12,6 +11,7 @@ import {
   IUploadConfig,
   IUploadResult,
 } from '@file-chunk-uploader/types';
+import { generateFileId } from '@file-chunk-uploader/utils';
 import {
   createCancelError,
   createPauseError,
@@ -158,6 +158,7 @@ export class ChunkUploadCoordinator {
   public async processUpload(file: File, config: IUploadConfig): Promise<IUploadResult> {
     // 生成文件ID - 在try外部定义以便在catch中访问
     const fileId = generateFileId(file);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let task: any | undefined;
 
     try {

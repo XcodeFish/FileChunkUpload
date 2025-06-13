@@ -16,13 +16,19 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@file-chunk-uploader/core": "workspace:*",
-    "@file-chunk-uploader/types": "workspace:*",
-    "@file-chunk-uploader/utils": "workspace:*"
+    "@file-chunk-uploader/core": "0.1.0",
+    "@file-chunk-uploader/types": "0.1.0",
+    "@file-chunk-uploader/utils": "0.1.0"
   },
   "publishConfig": {
     "access": "public"
   },
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^24.0.1",
+    "@rollup/plugin-node-resolve": "^15.0.1",
+    "@rollup/plugin-terser": "^0.4.0",
+    "@rollup/plugin-typescript": "^12.1.2"
+  }
 }
