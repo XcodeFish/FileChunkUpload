@@ -2,6 +2,7 @@
   "name": "@file-chunk-uploader/network",
   "version": "0.1.0",
   "description": "Network functionality for file-chunk-uploader",
+  "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",
@@ -12,17 +13,24 @@
     "build": "rollup -c",
     "dev": "rollup -c -w",
     "lint": "eslint --ext .ts,.tsx src",
-    "test": "jest",
+    "test": "jest --config jest.config.cjs",
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@file-chunk-uploader/core": "workspace:*",
-    "@file-chunk-uploader/types": "workspace:*",
-    "@file-chunk-uploader/utils": "workspace:*"
+    "@file-chunk-uploader/core": "0.1.0",
+    "@file-chunk-uploader/types": "0.1.0",
+    "@file-chunk-uploader/utils": "0.1.0"
   },
   "publishConfig": {
     "access": "public"
   },
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-terser": "^0.4.0",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "rollup-plugin-dts": "^6.2.1"
+  }
 }

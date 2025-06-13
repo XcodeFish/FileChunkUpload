@@ -2,10 +2,10 @@
  * Fetch API适配器实现
  * 基于浏览器原生Fetch API的网络请求适配器
  */
-import { Logger } from '@file-chunk-uploader/core';
+import { Logger } from '@file-chunk-uploader/core/src/developer-mode';
 import { IRequestConfig, IResponse } from '@file-chunk-uploader/types';
 
-import { BaseNetworkAdapter } from './base-adapter';
+import { BaseNetworkAdapter, NetworkErrorType } from './base-adapter';
 
 /**
  * FetchAdapter类
@@ -116,10 +116,14 @@ export class FetchAdapter extends BaseNetworkAdapter {
 
       // 如果是中止错误
       if (error.name === 'AbortError') {
-        throw this.createNetworkError('请求已中止', processedConfig, {
+        const abortError = this.createNetworkError('请求已中止', processedConfig, {
           aborted: true,
           retryable: false,
+          errorType: NetworkErrorType.ABORTED,
         });
+        // 确保错误名称正确
+        abortError.name = 'AbortError';
+        throw abortError;
       }
 
       // 如果已经是我们创建的网络错误，直接抛出

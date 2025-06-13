@@ -2,7 +2,7 @@
  * 网络适配器基础抽象类
  * 提供网络请求的通用实现和抽象方法
  */
-import { Logger } from '@file-chunk-uploader/core';
+import { Logger } from '@file-chunk-uploader/core/src/developer-mode';
 import {
   INetworkAdapter,
   IRequestConfig,

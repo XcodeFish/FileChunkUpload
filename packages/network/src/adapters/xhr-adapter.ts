@@ -2,7 +2,7 @@
  * XHR适配器实现
  * 基于XMLHttpRequest的网络请求适配器
  */
-import { Logger } from '@file-chunk-uploader/core';
+import { Logger } from '@file-chunk-uploader/core/src/developer-mode';
 import { IRequestConfig, IResponse, IProgressEvent } from '@file-chunk-uploader/types';
 
 import { BaseNetworkAdapter, NetworkErrorType } from './base-adapter';

@@ -22,14 +22,14 @@ export interface ISpeedTestResult {
 /**
  * 测速事件
  */
-export enum SpeedTestEvent {
+export const SpeedTestEvent = {
   /** 测速开始 */
-  START = 'speed-test:start',
+  START: 'speed-test:start',
   /** 测速结束 */
-  COMPLETE = 'speed-test:complete',
+  COMPLETE: 'speed-test:complete',
   /** 测速错误 */
-  ERROR = 'speed-test:error',
-}
+  ERROR: 'speed-test:error',
+} as const;
 
 /**
  * 测速配置接口
@@ -322,7 +322,7 @@ export class NetworkSpeedTester {
     }
 
     try {
-      this.eventEmitter.emit(SpeedTestEvent.START);
+      this.eventEmitter.emit('speed-test:start');
       this.logger?.info(
         NETWORK_ADAPTIVE_LOG_CATEGORY,
         `开始网络测速 (样本大小: ${Math.round(this.sampleSize / 1024)}KB)`,
@@ -347,7 +347,7 @@ export class NetworkSpeedTester {
       // 添加到历史记录
       this.addToHistory(result);
 
-      this.eventEmitter.emit(SpeedTestEvent.COMPLETE, result);
+      this.eventEmitter.emit('speed-test:complete', result);
       this.logger?.info(
         NETWORK_ADAPTIVE_LOG_CATEGORY,
         `测速完成: 上传=${result.uploadSpeed}Kbps, 下载=${result.downloadSpeed}Kbps, 延迟=${result.latency}ms`,
@@ -355,7 +355,7 @@ export class NetworkSpeedTester {
 
       return result;
     } catch (error) {
-      this.eventEmitter.emit(SpeedTestEvent.ERROR, error);
+      this.eventEmitter.emit('speed-test:error', error);
       this.logger?.error(NETWORK_ADAPTIVE_LOG_CATEGORY, `测速失败: ${(error as Error).message}`);
       throw error;
     } finally {
