@@ -1,8 +1,6 @@
 /**
  * 错误处理器事件通知和日志功能测试
  */
-import { ErrorCode } from '@file-chunk-uploader/types';
-
 import { ErrorHandler, createErrorHandler } from '../src/error-handler';
 import { UploadError } from '../src/error-types';
 
@@ -79,7 +77,7 @@ describe('ErrorHandler 事件通知和日志功能', () => {
   });
 
   test('应该记录错误日志', () => {
-    const error = new UploadError('上传失败', ErrorCode.NETWORK_ERROR, {
+    const error = new UploadError('上传失败', 'network_error', {
       fileId: 'file-1',
       chunkIndex: 2,
     });
@@ -101,7 +99,7 @@ describe('ErrorHandler 事件通知和日志功能', () => {
   });
 
   test('应该记录重试决策日志', () => {
-    const error = new UploadError('上传失败', ErrorCode.NETWORK_ERROR, {
+    const error = new UploadError('上传失败', 'network_error', {
       fileId: 'file-1',
       chunkIndex: 2,
       retryable: true,
@@ -128,7 +126,7 @@ describe('ErrorHandler 事件通知和日志功能', () => {
   });
 
   test('应该发送错误事件通知', () => {
-    const error = new UploadError('上传失败', ErrorCode.NETWORK_ERROR, {
+    const error = new UploadError('上传失败', 'network_error', {
       fileId: 'file-1',
       chunkIndex: 2,
     });
@@ -155,7 +153,7 @@ describe('ErrorHandler 事件通知和日志功能', () => {
   });
 
   test('应该处理不可重试的错误', () => {
-    const error = new UploadError('存储配额已满', ErrorCode.QUOTA_EXCEEDED, {
+    const error = new UploadError('存储配额已满', 'quota_exceeded', {
       fileId: 'file-1',
       retryable: false,
     });
@@ -192,7 +190,7 @@ describe('ErrorHandler 事件通知和日志功能', () => {
       eventEmitter as any,
     );
 
-    const error = new UploadError('上传失败', ErrorCode.NETWORK_ERROR);
+    const error = new UploadError('上传失败', 'network_error');
     const context = { retryCount: 0, timestamp: Date.now() };
 
     silentHandler.handle(error, context);

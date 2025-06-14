@@ -27,6 +27,7 @@ export default defineConfig({
     alias: {
       '@file-chunk-uploader/core': resolve(__dirname, '../../packages/core/src'),
       '@file-chunk-uploader/types': resolve(__dirname, '../../packages/types/src'),
+      '@file-chunk-uploader/errors': resolve(__dirname, '../../packages/errors/src'),
     },
   },
 });

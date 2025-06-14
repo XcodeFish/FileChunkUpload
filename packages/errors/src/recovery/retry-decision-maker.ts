@@ -255,7 +255,8 @@ export class RetryDecisionMaker {
     // 添加随机抖动避免同时重试
     // 默认抖动因子为0.1
     const defaultJitterFactor = 0.1;
-    const jitterFactor = this.config.jitterFactor ?? defaultJitterFactor;
+    // 由于配置中没有 jitterFactor，直接使用默认值
+    const jitterFactor = defaultJitterFactor;
     // 随着重试次数增加，减小jitter范围，使延迟更加可预测
     const adjustedJitterFactor = jitterFactor / (1 + retryCount * 0.2);
     const jitter = delay * adjustedJitterFactor * (Math.random() * 2 - 1);
@@ -379,3 +380,22 @@ const createDefaultNetworkDetector = () => {
     },
   };
 };
+
+/**
+ * 获取基于网络状况的重试决策
+ * @param networkInfo 网络信息
+ * @returns 是否应该重试
+ */
+export function shouldRetryBasedOnNetwork(networkInfo: NetworkInfo): boolean {
+  // 如果离线，则不建议重试
+  if (!networkInfo.online) {
+    return false;
+  }
+
+  // 如果RTT过高，网络质量差，建议减少重试
+  if (networkInfo.rtt > 1000) {
+    return false;
+  }
+
+  return true;
+}

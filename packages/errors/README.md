@@ -89,3 +89,52 @@ pnpm build
 # 运行测试
 pnpm test
 ```
+
+## 测试
+
+`@file-chunk-uploader/errors` 包使用 Jest 进行单元测试和集成测试。测试配置文件位于项目根目录下的 `jest.config.js` 中。
+
+### 运行测试
+
+可以使用以下命令运行测试：
+
+```bash
+# 运行所有测试
+npm test
+
+# 运行测试并观察文件变化
+npm run test:watch
+
+# 运行测试并生成覆盖率报告
+npm run test:coverage
+```
+
+### 测试覆盖率
+
+测试覆盖率阈值设置如下：
+
+- 分支覆盖率：75%
+- 函数覆盖率：80%
+- 行覆盖率：80%
+- 语句覆盖率：80%
+
+覆盖率报告会生成在 `coverage` 目录下。
+
+### 编写测试
+
+测试文件应放在 `__tests__` 目录下，并以 `.test.ts` 或 `.spec.ts` 结尾。测试应该覆盖所有公共API和关键的内部功能。
+
+```typescript
+// 示例测试
+import { UploadError } from '../src/upload-error';
+
+describe('UploadError', () => {
+  it('should create an error with correct properties', () => {
+    const error = new UploadError('Test error', 'test_code');
+
+    expect(error.message).toBe('Test error');
+    expect(error.code).toBe('test_code');
+    expect(error.name).toBe('UploadError');
+  });
+});
+```

@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>文件上传重试状态可视化示例</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+
+    .container {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    h1,
+    h2 {
+      color: #333;
+    }
+
+    .file-selector {
+      margin-bottom: 15px;
+    }
+
+    .upload-btn {
+      background-color: #4CAF50;
+      border: none;
+      color: white;
+      padding: 10px 20px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 16px;
+      margin: 10px 0;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .upload-btn:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+
+    .control-btns {
+      margin: 10px 0;
+    }
+
+    .control-btns button {
+      background-color: #2196F3;
+      border: none;
+      color: white;
+      padding: 8px 16px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 14px;
+      margin-right: 10px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .logs {
+      height: 200px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      padding: 10px;
+      background-color: #f9f9f9;
+      font-family: monospace;
+      font-size: 14px;
+      margin-top: 20px;
+    }
+
+    .progress-container {
+      margin: 20px 0;
+    }
+
+    .progress-bar {
+      height: 20px;
+      background-color: #f0f0f0;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background-color: #4CAF50;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      margin-top: 5px;
+      font-size: 14px;
+      color: #666;
+    }
+
+    /* 导航样式 */
+    .nav-links {
+      display: flex;
+      margin-bottom: 20px;
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+    }
+
+    .nav-links a {
+      padding: 8px 16px;
+      margin-right: 10px;
+      text-decoration: none;
+      color: #333;
+      border-radius: 4px;
+      background-color: #f0f0f0;
+    }
+
+    .nav-links a:hover,
+    .nav-links a.active {
+      background-color: #2196F3;
+      color: white;
+    }
+
+    /* 重试可视化相关样式 */
+    .retry-container {
+      margin-top: 20px;
+    }
+
+    .retry-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .retry-status {
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: white;
+      font-weight: bold;
+      display: inline-block;
+    }
+
+    .status-idle {
+      background-color: #888;
+    }
+
+    .status-retrying {
+      background-color: #FF9800;
+    }
+
+    .status-success {
+      background-color: #4CAF50;
+    }
+
+    .status-failed {
+      background-color: #F44336;
+    }
+
+    .countdown-container {
+      margin: 10px 0;
+      background-color: #f1f1f1;
+      border-radius: 4px;
+      padding: 10px;
+      display: none;
+    }
+
+    .countdown-bar {
+      height: 6px;
+      background-color: #ddd;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .countdown-fill {
+      height: 100%;
+      background-color: #FF9800;
+      width: 100%;
+      transition: width 1s linear;
+    }
+
+    .countdown-text {
+      margin-top: 5px;
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .retry-stats {
+      display: flex;
+      margin-top: 10px;
+    }
+
+    .retry-stat-item {
+      flex: 1;
+      text-align: center;
+      padding: 10px;
+      background-color: #f9f9f9;
+      border-radius: 4px;
+      margin-right: 10px;
+    }
+
+    .retry-stat-item:last-child {
+      margin-right: 0;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .network-quality {
+      margin-top: 15px;
+      padding: 10px;
+      background-color: #f9f9f9;
+      border-radius: 4px;
+    }
+
+    .quality-indicator {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+
+    .quality-excellent {
+      background-color: #4CAF50;
+    }
+
+    .quality-good {
+      background-color: #8BC34A;
+    }
+
+    .quality-fair {
+      background-color: #FFC107;
+    }
+
+    .quality-poor {
+      background-color: #FF5722;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>文件上传重试状态可视化示例</h1>
+
+  <!-- 示例导航 -->
+  <div class="nav-links">
+    <a href="index.html">基本示例</a>
+    <a href="retry-visualization.html" class="active">重试状态可视化</a>
+  </div>
+
+  <p>本示例展示了错误重试机制的状态可视化，包括重试次数、倒计时和网络质量评估</p>
+
+  <div class="container">
+    <h2>文件上传</h2>
+    <div class="file-selector">
+      <input type="file" id="fileInput" />
+    </div>
+    <button id="uploadBtn" class="upload-btn">上传文件</button>
+
+    <div class="control-btns">
+      <button id="pauseBtn" disabled>暂停</button>
+      <button id="resumeBtn" disabled>恢复</button>
+      <button id="cancelBtn" disabled>取消</button>
+      <button id="simulateErrorBtn" disabled>模拟错误</button>
+    </div>
+
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-text" id="progressText">等待上传 - 0%</div>
+    </div>
+
+    <!-- 重试状态可视化部分 -->
+    <div class="retry-container">
+      <div class="retry-header">
+        <h3>重试状态</h3>
+        <div class="retry-status status-idle" id="retryStatus">空闲</div>
+      </div>
+
+      <!-- 重试倒计时 -->
+      <div class="countdown-container" id="countdownContainer">
+        <div class="countdown-bar">
+          <div class="countdown-fill" id="countdownFill"></div>
+        </div>
+        <div class="countdown-text" id="countdownText">准备重试中...</div>
+      </div>
+
+      <!-- 重试统计 -->
+      <div class="retry-stats">
+        <div class="retry-stat-item">
+          <div class="stat-value" id="totalRetriesValue">0</div>
+          <div class="stat-label">总重试次数</div>
+        </div>
+        <div class="retry-stat-item">
+          <div class="stat-value" id="successRetriesValue">0</div>
+          <div class="stat-label">成功重试</div>
+        </div>
+        <div class="retry-stat-item">
+          <div class="stat-value" id="failedRetriesValue">0</div>
+          <div class="stat-label">失败重试</div>
+        </div>
+        <div class="retry-stat-item">
+          <div class="stat-value" id="remainingRetriesValue">3</div>
+          <div class="stat-label">剩余重试</div>
+        </div>
+      </div>
+
+      <!-- 网络质量 -->
+      <div class="network-quality">
+        <h4>网络质量</h4>
+        <div>
+          <span class="quality-indicator" id="qualityIndicator"></span>
+          <span id="qualityText">未知</span>
+          (<span id="networkType">未检测</span>)
+        </div>
+        <div id="networkDetails" style="font-size: 12px; margin-top: 5px;">速度: -- Mbps, RTT: -- ms</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <h2>事件日志</h2>
+    <div class="logs" id="eventLogs"></div>
+  </div>
+
+  <script type="module" src="/src/retry-visualization.js"></script>
+</body>
+
+</html>

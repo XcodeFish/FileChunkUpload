@@ -21,361 +21,120 @@ const ExtendedErrorCode = {
  * @internal
  */
 interface HttpStatusCodeResult {
-  code: ErrorCode | string;
+  code: string;
   retryable: boolean;
 }
 
 /**
- * UploadError类
- * 扩展Error类，实现IUploadError接口，提供更详细的上传错误信息
+ * 上传错误类
+ * 实现IUploadError接口，提供错误处理和本地化功能
  */
 export class UploadError extends Error implements IUploadError {
-  /** 错误代码 */
-  public readonly code: ErrorCode | string;
-
-  /** 是否可重试 */
-  public readonly retryable: boolean;
-
-  /** 错误发生时间戳 */
-  public readonly timestamp: number;
-
-  /** 原始错误 */
-  public readonly originalError?: Error;
-
-  /** 文件ID */
-  public readonly fileId?: string;
-
-  /** 分片索引 */
-  public readonly chunkIndex?: number;
-
-  /** 错误详情 */
-  public readonly details?: Record<string, unknown>;
-
-  /** 是否已处理 */
-  public handled?: boolean;
-
-  /** 触发错误的操作 */
-  public readonly operation?: string;
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly details?: Record<string, unknown>;
+  readonly fileId?: string;
+  readonly chunkIndex?: number;
+  readonly originalError?: Error;
+  readonly operation?: string;
+  readonly timestamp: number;
+  handled: boolean;
 
   /**
    * 构造函数
    * @param message 错误消息
-   * @param code 错误代码，默认为UNKNOWN_ERROR
-   * @param options 其他选项
+   * @param code 错误代码
+   * @param options 错误选项
    */
   constructor(
     message: string,
-    code: ErrorCode | string = ErrorCode.UNKNOWN_ERROR,
+    code: string | ErrorCode = 'unknown_error',
     options: {
       retryable?: boolean;
-      originalError?: Error;
+      details?: Record<string, unknown>;
       fileId?: string;
       chunkIndex?: number;
-      details?: Record<string, unknown>;
+      originalError?: Error;
       operation?: string;
+      handled?: boolean;
     } = {},
   ) {
     super(message);
-
-    // 设置名称
     this.name = 'UploadError';
-
-    // 设置错误代码
     this.code = code;
-
-    // 设置是否可重试，优先使用options中的值，其次根据错误代码决定
-    this.retryable =
-      options.retryable !== undefined ? options.retryable : this.isRetryableByDefault(code);
-
-    // 设置错误发生时间戳
-    this.timestamp = Date.now();
-
-    // 设置其他属性
-    this.originalError = options.originalError;
+    this.details = options.details;
     this.fileId = options.fileId;
     this.chunkIndex = options.chunkIndex;
-    this.details = options.details;
+    this.originalError = options.originalError;
     this.operation = options.operation;
+    this.timestamp = Date.now();
+    this.handled = options.handled || false;
 
-    // 初始化错误处理状态
-    this.handled = false;
-
-    // 确保stack属性被正确捕获
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, this.constructor);
+    // 根据错误代码决定是否可重试
+    if (options.retryable !== undefined) {
+      this.retryable = options.retryable;
+    } else {
+      this.retryable = this.isRetryableErrorCode(code);
     }
+
+    // 确保原型链正确
+    Object.setPrototypeOf(this, UploadError.prototype);
   }
 
   /**
-   * 根据错误代码决定默认是否可重试
+   * 判断错误代码是否可重试
    * @param code 错误代码
    * @returns 是否可重试
-   * @private
    */
-  private isRetryableByDefault(code: ErrorCode | string): boolean {
-    // 可重试的错误类型
-    const retryableErrorCodes = [
+  private isRetryableErrorCode(code: string | ErrorCode): boolean {
+    const retryableCodes = [
       ErrorCode.NETWORK_ERROR,
+      ErrorCode.NETWORK_DISCONNECT,
       ErrorCode.SERVER_ERROR,
+      ErrorCode.SERVER_TIMEOUT,
       ErrorCode.SERVER_OVERLOAD,
       ErrorCode.TIMEOUT,
       ErrorCode.CHUNK_UPLOAD_FAILED,
+      ErrorCode.REQUEST_FAILED,
+      'network_error',
+      'network_disconnect',
+      'server_error',
+      'server_timeout',
+      'server_overload',
+      'timeout',
+      'timeout_error',
+      'chunk_upload_failed',
+      'request_failed',
     ];
 
-    return retryableErrorCodes.includes(code as ErrorCode);
-  }
-
-  /**
-   * 根据HTTP状态码决定错误代码和是否可重试
-   * @param statusCode HTTP状态码
-   * @returns 错误代码和可重试状态
-   */
-  private static getErrorInfoFromStatusCode(statusCode?: number): HttpStatusCodeResult {
-    // 默认值
-    const result: HttpStatusCodeResult = {
-      code: ErrorCode.SERVER_ERROR,
-      retryable: true,
-    };
-
-    if (!statusCode) return result;
-
-    // 按HTTP状态码范围和具体状态码分组处理
-
-    // 1xx 信息性响应
-    if (statusCode >= 100 && statusCode < 200) {
-      // 信息性响应通常不会作为错误处理，但如果出现，视为服务器错误
-      result.code = ErrorCode.SERVER_ERROR;
-      result.retryable = true;
-    }
-    // 2xx 成功
-    else if (statusCode >= 200 && statusCode < 300) {
-      // 成功响应通常不会作为错误处理，但如果出现，视为服务器错误
-      result.code = ErrorCode.SERVER_ERROR;
-      result.retryable = true;
-    }
-    // 3xx 重定向
-    else if (statusCode >= 300 && statusCode < 400) {
-      // 重定向通常不会作为错误处理，但如果出现，视为服务器错误
-      result.code = ErrorCode.SERVER_ERROR;
-      result.retryable = true;
-    }
-    // 4xx 客户端错误
-    else if (statusCode >= 400 && statusCode < 500) {
-      // 客户端错误默认不可重试
-      result.retryable = false;
-
-      // 特殊状态码处理
-      switch (statusCode) {
-        case 400: // 错误请求
-          result.code = ErrorCode.INVALID_PARAMETER;
-          break;
-        case 401: // 未授权
-          result.code = ErrorCode.AUTHENTICATION_FAILED;
-          break;
-        case 403: // 禁止访问
-          result.code = ErrorCode.AUTHORIZATION_FAILED;
-          break;
-        case 404: // 资源未找到
-          result.code = ExtendedErrorCode.RESOURCE_NOT_FOUND;
-          break;
-        case 408: // 请求超时
-          result.code = ErrorCode.TIMEOUT;
-          result.retryable = true; // 超时错误可以重试
-          break;
-        case 409: // 资源冲突
-          result.code = ExtendedErrorCode.RESOURCE_CONFLICT;
-          break;
-        case 413: // 请求实体太大
-          result.code = ErrorCode.FILE_TOO_LARGE;
-          break;
-        case 415: // 不支持的媒体类型
-          result.code = ExtendedErrorCode.UNSUPPORTED_MEDIA_TYPE;
-          break;
-        case 429: // 请求过多
-          result.code = ErrorCode.SERVER_OVERLOAD;
-          result.retryable = true; // 请求过多可以稍后重试
-          break;
-        default: // 其他4xx错误
-          result.code = ErrorCode.SERVER_ERROR;
-          break;
-      }
-    }
-    // 5xx 服务器错误
-    else if (statusCode >= 500) {
-      // 服务器错误通常可重试
-      result.retryable = true;
-
-      // 特殊状态码处理
-      switch (statusCode) {
-        case 500: // 服务器内部错误
-          result.code = ErrorCode.SERVER_ERROR;
-          break;
-        case 501: // 未实现
-          result.code = ErrorCode.NOT_IMPLEMENTED;
-          result.retryable = false; // 未实现的功能重试也没用
-          break;
-        case 502: // 网关错误
-          result.code = ErrorCode.SERVER_ERROR;
-          break;
-        case 503: // 服务不可用
-          result.code = ErrorCode.SERVER_OVERLOAD;
-          break;
-        case 504: // 网关超时
-          result.code = ErrorCode.TIMEOUT;
-          break;
-        default: // 其他5xx错误
-          result.code = ErrorCode.SERVER_ERROR;
-          break;
-      }
-    }
-    // 未知状态码
-    else {
-      result.code = ErrorCode.UNKNOWN_ERROR;
-      result.retryable = false;
-    }
-
-    return result;
-  }
-
-  /**
-   * 创建网络错误
-   * @param message 错误消息
-   * @param originalError 原始错误
-   * @param options 其他选项
-   * @returns 上传错误实例
-   */
-  static network(
-    message: string,
-    originalError?: Error,
-    options: Partial<
-      Omit<IUploadError, 'message' | 'code' | 'originalError' | 'retryable' | 'timestamp'>
-    > = {},
-  ): UploadError {
-    return new UploadError(message, ErrorCode.NETWORK_ERROR, {
-      retryable: true,
-      originalError,
-      ...options,
-    });
-  }
-
-  /**
-   * 创建文件错误
-   * @param message 错误消息
-   * @param code 错误代码
-   * @param options 其他选项
-   * @returns 上传错误实例
-   */
-  static file(
-    message: string,
-    code: ErrorCode = ErrorCode.FILE_NOT_FOUND,
-    options: Partial<Omit<IUploadError, 'message' | 'code' | 'retryable' | 'timestamp'>> = {},
-  ): UploadError {
-    return new UploadError(message, code, {
-      retryable: false,
-      ...options,
-    });
-  }
-
-  /**
-   * 创建服务器错误
-   * @param message 错误消息
-   * @param statusCode HTTP状态码
-   * @param options 其他选项
-   * @returns 上传错误实例
-   */
-  static server(
-    message: string,
-    statusCode?: number,
-    options: Partial<Omit<IUploadError, 'message' | 'code' | 'retryable' | 'timestamp'>> = {},
-  ): UploadError {
-    // 使用提取的函数处理HTTP状态码
-    const { code, retryable } = UploadError.getErrorInfoFromStatusCode(statusCode);
-
-    return new UploadError(message, code, {
-      retryable,
-      details: { statusCode },
-      ...options,
-    });
-  }
-
-  /**
-   * 创建超时错误
-   * @param message 错误消息
-   * @param options 其他选项
-   * @returns 上传错误实例
-   */
-  static timeout(
-    message: string,
-    options: Partial<Omit<IUploadError, 'message' | 'code' | 'retryable' | 'timestamp'>> = {},
-  ): UploadError {
-    return new UploadError(message, ErrorCode.TIMEOUT, {
-      retryable: true,
-      ...options,
-    });
-  }
-
-  /**
-   * 创建分片错误
-   * @param message 错误消息
-   * @param chunkIndex 分片索引
-   * @param options 其他选项
-   * @returns 上传错误实例
-   */
-  static chunk(
-    message: string,
-    chunkIndex: number,
-    options: Partial<
-      Omit<IUploadError, 'message' | 'code' | 'chunkIndex' | 'retryable' | 'timestamp'>
-    > = {},
-  ): UploadError {
-    return new UploadError(message, ErrorCode.CHUNK_UPLOAD_FAILED, {
-      retryable: true,
-      chunkIndex,
-      ...options,
-    });
+    return retryableCodes.includes(code.toLowerCase());
   }
 
   /**
    * 获取本地化错误消息
-   * @param locale 语言代码(默认'zh-CN')
+   * @param locale 语言代码
    * @returns 本地化的错误消息
    */
-  getLocalizedMessage(locale: string = 'zh-CN'): string {
-    // 默认直接返回当前消息
-    if (!this.code || !errorMessages[locale]) {
-      return this.message;
-    }
-
-    const localizedMessages = errorMessages[locale];
-    const template = localizedMessages[this.code] || this.message;
-
-    // 如果是模板字符串，则进行变量替换
-    if (template.includes('{{')) {
-      return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-        if (key === 'message') return this.message;
-        if (this.details && key in this.details) return String(this.details[key]);
-        return match;
-      });
-    }
-
-    return template;
+  getLocalizedMessage(locale: string = 'en-US'): string {
+    return getLocalizedErrorMessage(this.code, locale, this.message);
   }
 
   /**
-   * 获取开发者模式的详细错误信息
-   * @returns 详细的错误信息对象
+   * 获取开发者模式下的详细错误信息
+   * @returns 详细错误信息
    */
   getDevModeDetails(): Record<string, unknown> {
     return {
       name: this.name,
       message: this.message,
       code: this.code,
-      timestamp: this.timestamp,
       retryable: this.retryable,
+      timestamp: this.timestamp,
       fileId: this.fileId,
       chunkIndex: this.chunkIndex,
-      operation: this.operation,
       details: this.details,
+      operation: this.operation,
+      handled: this.handled,
       stack: this.stack,
       originalError: this.originalError
         ? {
@@ -388,167 +147,299 @@ export class UploadError extends Error implements IUploadError {
   }
 
   /**
-   * 将错误转换为JSON表示
-   * @returns 错误的JSON表示
+   * 将错误转换为JSON
+   * @returns JSON表示
    */
   toJSON(): Record<string, unknown> {
     return {
       name: this.name,
       message: this.message,
       code: this.code,
-      timestamp: this.timestamp,
       retryable: this.retryable,
+      timestamp: this.timestamp,
       fileId: this.fileId,
       chunkIndex: this.chunkIndex,
-      operation: this.operation,
       details: this.details,
+      operation: this.operation,
+      handled: this.handled,
     };
+  }
+
+  /**
+   * 创建网络错误
+   * @param message 错误消息
+   * @param options 错误选项
+   * @returns 网络错误实例
+   */
+  static network(
+    message: string,
+    options: {
+      retryable?: boolean;
+      details?: Record<string, unknown>;
+      fileId?: string;
+      chunkIndex?: number;
+      originalError?: Error;
+    } = {},
+  ): UploadError {
+    return new UploadError(message, ErrorCode.NETWORK_ERROR, {
+      retryable: options.retryable !== undefined ? options.retryable : true,
+      details: options.details,
+      fileId: options.fileId,
+      chunkIndex: options.chunkIndex,
+      originalError: options.originalError,
+      operation: 'network',
+    });
+  }
+
+  /**
+   * 创建文件错误
+   * @param message 错误消息
+   * @param code 错误代码
+   * @param options 错误选项
+   * @returns 文件错误实例
+   */
+  static file(
+    message: string,
+    code: string | ErrorCode = ErrorCode.FILE_READ_ERROR,
+    options: {
+      retryable?: boolean;
+      details?: Record<string, unknown>;
+      fileId?: string;
+      originalError?: Error;
+    } = {},
+  ): UploadError {
+    return new UploadError(message, code, {
+      retryable: options.retryable !== undefined ? options.retryable : false,
+      details: options.details,
+      fileId: options.fileId,
+      originalError: options.originalError,
+      operation: 'file',
+    });
+  }
+
+  /**
+   * 创建服务器错误
+   * @param message 错误消息
+   * @param statusCode HTTP状态码
+   * @param options 错误选项
+   * @returns 服务器错误实例
+   */
+  static server(
+    message: string,
+    statusCode?: number,
+    options: {
+      retryable?: boolean;
+      details?: Record<string, unknown>;
+      fileId?: string;
+      chunkIndex?: number;
+      originalError?: Error;
+    } = {},
+  ): UploadError {
+    const result = handleHttpStatusCode(statusCode);
+
+    return new UploadError(message, result.code, {
+      retryable: options.retryable !== undefined ? options.retryable : result.retryable,
+      details: { ...(options.details || {}), statusCode },
+      fileId: options.fileId,
+      chunkIndex: options.chunkIndex,
+      originalError: options.originalError,
+      operation: 'server',
+    });
+  }
+
+  /**
+   * 创建超时错误
+   * @param message 错误消息
+   * @param options 错误选项
+   * @returns 超时错误实例
+   */
+  static timeout(
+    message: string,
+    options: {
+      retryable?: boolean;
+      details?: Record<string, unknown>;
+      fileId?: string;
+      chunkIndex?: number;
+      originalError?: Error;
+    } = {},
+  ): UploadError {
+    return new UploadError(message, ErrorCode.TIMEOUT, {
+      retryable: options.retryable !== undefined ? options.retryable : true,
+      details: options.details,
+      fileId: options.fileId,
+      chunkIndex: options.chunkIndex,
+      originalError: options.originalError,
+      operation: 'timeout',
+    });
+  }
+
+  /**
+   * 创建分片错误
+   * @param message 错误消息
+   * @param chunkIndex 分片索引
+   * @param options 错误选项
+   * @returns 分片错误实例
+   */
+  static chunk(
+    message: string,
+    chunkIndex: number,
+    options: {
+      retryable?: boolean;
+      details?: Record<string, unknown>;
+      fileId?: string;
+      originalError?: Error;
+      code?: string | ErrorCode;
+    } = {},
+  ): UploadError {
+    return new UploadError(message, options.code || ErrorCode.CHUNK_UPLOAD_FAILED, {
+      retryable: options.retryable !== undefined ? options.retryable : true,
+      details: options.details,
+      fileId: options.fileId,
+      chunkIndex,
+      originalError: options.originalError,
+      operation: 'chunk',
+    });
   }
 }
 
 /**
- * 错误消息本地化映射表
- * 支持不同语言的错误消息模板
+ * 处理HTTP状态码，返回相应的错误代码和是否可重试
+ * @param statusCode HTTP状态码
+ * @returns 错误处理结果
  */
-const errorMessages: Record<string, Record<string, string>> = {
-  'zh-CN': {
-    // 通用错误
-    [ErrorCode.UNKNOWN_ERROR]: '未知错误',
-    [ErrorCode.NOT_IMPLEMENTED]: '功能未实现',
-    [ErrorCode.OPERATION_CANCELED]: '操作已取消',
-    [ErrorCode.TIMEOUT]: '操作超时',
-    [ErrorCode.INVALID_PARAMETER]: '无效参数',
+function handleHttpStatusCode(statusCode?: number): HttpStatusCodeResult {
+  if (!statusCode) {
+    return { code: ErrorCode.SERVER_ERROR, retryable: true };
+  }
 
-    // 文件错误
-    [ErrorCode.FILE_NOT_FOUND]: '找不到文件',
-    [ErrorCode.FILE_TOO_LARGE]: '文件太大',
-    [ErrorCode.FILE_TYPE_NOT_ALLOWED]: '不允许的文件类型',
-    [ErrorCode.FILE_EMPTY]: '文件为空',
-    [ErrorCode.FILE_CORRUPTED]: '文件已损坏',
-    [ErrorCode.FILE_READ_ERROR]: '文件读取错误',
+  // 根据状态码分类处理
+  if (statusCode >= 200 && statusCode < 300) {
+    // 2xx: 成功响应
+    return { code: 'success', retryable: false };
+  } else if (statusCode >= 400 && statusCode < 500) {
+    // 4xx: 客户端错误
+    switch (statusCode) {
+      case 401:
+        return { code: ErrorCode.AUTHENTICATION_FAILED, retryable: false };
+      case 403:
+        return { code: ErrorCode.AUTHORIZATION_FAILED, retryable: false };
+      case 404:
+        return { code: ExtendedErrorCode.RESOURCE_NOT_FOUND, retryable: false };
+      case 409:
+        return { code: ExtendedErrorCode.RESOURCE_CONFLICT, retryable: false };
+      case 413:
+        return { code: ErrorCode.FILE_TOO_LARGE, retryable: false };
+      case 415:
+        return { code: ExtendedErrorCode.UNSUPPORTED_MEDIA_TYPE, retryable: false };
+      case 429:
+        return { code: ErrorCode.SERVER_OVERLOAD, retryable: true };
+      default:
+        return { code: 'client_error', retryable: false };
+    }
+  } else if (statusCode >= 500 && statusCode < 600) {
+    // 5xx: 服务器错误
+    switch (statusCode) {
+      case 500:
+        return { code: ErrorCode.SERVER_ERROR, retryable: true };
+      case 502:
+      case 503:
+      case 504:
+        return { code: ErrorCode.SERVER_OVERLOAD, retryable: true };
+      default:
+        return { code: ErrorCode.SERVER_ERROR, retryable: true };
+    }
+  }
 
-    // 网络错误
-    [ErrorCode.NETWORK_ERROR]: '网络错误',
-    [ErrorCode.NETWORK_DISCONNECT]: '网络连接已断开',
-    [ErrorCode.SERVER_ERROR]: '服务器错误',
-    [ErrorCode.SERVER_TIMEOUT]: '服务器响应超时',
-    [ErrorCode.SERVER_OVERLOAD]: '服务器繁忙',
-    [ErrorCode.REQUEST_FAILED]: '请求失败',
-    [ErrorCode.RESPONSE_PARSE_ERROR]: '响应解析错误',
-
-    // 分片错误
-    [ErrorCode.CHUNK_UPLOAD_FAILED]: '分片上传失败',
-    [ErrorCode.CHUNK_SIZE_INVALID]: '分片大小无效',
-    [ErrorCode.CHUNK_OUT_OF_RANGE]: '分片索引超出范围',
-    [ErrorCode.INVALID_CHUNK_SIZE]: '无效的分片大小',
-
-    // 存储错误
-    [ErrorCode.STORAGE_ERROR]: '存储错误',
-    [ErrorCode.STORAGE_FULL]: '存储空间已满',
-    [ErrorCode.QUOTA_EXCEEDED]: '存储配额已超出',
-    [ErrorCode.STORAGE_READ_ERROR]: '存储读取错误',
-    [ErrorCode.STORAGE_WRITE_ERROR]: '存储写入错误',
-
-    // 插件错误
-    [ErrorCode.PLUGIN_ERROR]: '插件错误',
-    [ErrorCode.PLUGIN_NOT_FOUND]: '插件未找到',
-    [ErrorCode.PLUGIN_INITIALIZATION_FAILED]: '插件初始化失败',
-    [ErrorCode.PLUGIN_CONFLICT]: '插件冲突',
-
-    // Worker错误
-    [ErrorCode.WORKER_ERROR]: 'Worker错误',
-    [ErrorCode.WORKER_NOT_SUPPORTED]: '不支持Web Worker',
-    [ErrorCode.WORKER_TERMINATED]: 'Worker已终止',
-    [ErrorCode.WORKER_TIMEOUT]: 'Worker执行超时',
-
-    // 安全错误
-    [ErrorCode.SECURITY_ERROR]: '安全错误',
-    [ErrorCode.AUTHENTICATION_FAILED]: '身份验证失败',
-    [ErrorCode.AUTHORIZATION_FAILED]: '授权失败',
-    [ErrorCode.TOKEN_EXPIRED]: '令牌已过期',
-    [ErrorCode.SIGNATURE_INVALID]: '签名无效',
-
-    // 扩展错误代码
-    [ExtendedErrorCode.RESOURCE_NOT_FOUND]: '资源未找到',
-    [ExtendedErrorCode.RESOURCE_CONFLICT]: '资源冲突',
-    [ExtendedErrorCode.UNSUPPORTED_MEDIA_TYPE]: '不支持的媒体类型',
-  },
-  'en-US': {
-    // 通用错误
-    [ErrorCode.UNKNOWN_ERROR]: 'Unknown error',
-    [ErrorCode.NOT_IMPLEMENTED]: 'Not implemented',
-    [ErrorCode.OPERATION_CANCELED]: 'Operation canceled',
-    [ErrorCode.TIMEOUT]: 'Operation timed out',
-    [ErrorCode.INVALID_PARAMETER]: 'Invalid parameter',
-
-    // 文件错误
-    [ErrorCode.FILE_NOT_FOUND]: 'File not found',
-    [ErrorCode.FILE_TOO_LARGE]: 'File too large',
-    [ErrorCode.FILE_TYPE_NOT_ALLOWED]: 'File type not allowed',
-    [ErrorCode.FILE_EMPTY]: 'File is empty',
-    [ErrorCode.FILE_CORRUPTED]: 'File is corrupted',
-    [ErrorCode.FILE_READ_ERROR]: 'File read error',
-
-    // 网络错误
-    [ErrorCode.NETWORK_ERROR]: 'Network error',
-    [ErrorCode.NETWORK_DISCONNECT]: 'Network disconnected',
-    [ErrorCode.SERVER_ERROR]: 'Server error',
-    [ErrorCode.SERVER_TIMEOUT]: 'Server timeout',
-    [ErrorCode.SERVER_OVERLOAD]: 'Server overloaded',
-    [ErrorCode.REQUEST_FAILED]: 'Request failed',
-    [ErrorCode.RESPONSE_PARSE_ERROR]: 'Response parse error',
-
-    // 分片错误
-    [ErrorCode.CHUNK_UPLOAD_FAILED]: 'Chunk upload failed',
-    [ErrorCode.CHUNK_SIZE_INVALID]: 'Invalid chunk size',
-    [ErrorCode.CHUNK_OUT_OF_RANGE]: 'Chunk index out of range',
-    [ErrorCode.INVALID_CHUNK_SIZE]: 'Invalid chunk size',
-
-    // 存储错误
-    [ErrorCode.STORAGE_ERROR]: 'Storage error',
-    [ErrorCode.STORAGE_FULL]: 'Storage full',
-    [ErrorCode.QUOTA_EXCEEDED]: 'Storage quota exceeded',
-    [ErrorCode.STORAGE_READ_ERROR]: 'Storage read error',
-    [ErrorCode.STORAGE_WRITE_ERROR]: 'Storage write error',
-
-    // 插件错误
-    [ErrorCode.PLUGIN_ERROR]: 'Plugin error',
-    [ErrorCode.PLUGIN_NOT_FOUND]: 'Plugin not found',
-    [ErrorCode.PLUGIN_INITIALIZATION_FAILED]: 'Plugin initialization failed',
-    [ErrorCode.PLUGIN_CONFLICT]: 'Plugin conflict',
-
-    // Worker错误
-    [ErrorCode.WORKER_ERROR]: 'Worker error',
-    [ErrorCode.WORKER_NOT_SUPPORTED]: 'Web Worker not supported',
-    [ErrorCode.WORKER_TERMINATED]: 'Worker terminated',
-    [ErrorCode.WORKER_TIMEOUT]: 'Worker timed out',
-
-    // 安全错误
-    [ErrorCode.SECURITY_ERROR]: 'Security error',
-    [ErrorCode.AUTHENTICATION_FAILED]: 'Authentication failed',
-    [ErrorCode.AUTHORIZATION_FAILED]: 'Authorization failed',
-    [ErrorCode.TOKEN_EXPIRED]: 'Token expired',
-    [ErrorCode.SIGNATURE_INVALID]: 'Invalid signature',
-
-    // 扩展错误代码
-    [ExtendedErrorCode.RESOURCE_NOT_FOUND]: 'Resource not found',
-    [ExtendedErrorCode.RESOURCE_CONFLICT]: 'Resource conflict',
-    [ExtendedErrorCode.UNSUPPORTED_MEDIA_TYPE]: 'Unsupported media type',
-  },
-};
+  // 其他状态码
+  return { code: 'unknown_status_code', retryable: false };
+}
 
 /**
- * 获取本地化的错误消息
- * @param code 错误代码
- * @param locale 语言代码
- * @param message 默认消息
- * @returns 本地化的错误消息
+ * 错误消息本地化
  */
 export function getLocalizedErrorMessage(
-  code: ErrorCode | string,
-  locale: string = 'zh-CN',
-  message?: string,
+  code: string | ErrorCode,
+  locale: string = 'en-US',
+  fallbackMessage?: string,
 ): string {
-  const localizedMessages = errorMessages[locale] || errorMessages['zh-CN'];
-  return localizedMessages[code] || message || String(code);
+  // 支持的语言
+  const supportedLocales = ['en-US', 'zh-CN'];
+
+  // 如果不支持的语言，回退到英文
+  if (!supportedLocales.includes(locale)) {
+    locale = 'en-US';
+  }
+
+  // 错误消息映射
+  const errorMessages: Record<string, Record<string, string>> = {
+    [ErrorCode.NETWORK_ERROR]: {
+      'en-US': 'Network error',
+      'zh-CN': '网络错误',
+    },
+    [ErrorCode.NETWORK_DISCONNECT]: {
+      'en-US': 'Network disconnected',
+      'zh-CN': '网络连接断开',
+    },
+    [ErrorCode.SERVER_ERROR]: {
+      'en-US': 'Server error',
+      'zh-CN': '服务器错误',
+    },
+    [ErrorCode.SERVER_TIMEOUT]: {
+      'en-US': 'Server timeout',
+      'zh-CN': '服务器超时',
+    },
+    [ErrorCode.SERVER_OVERLOAD]: {
+      'en-US': 'Server overloaded',
+      'zh-CN': '服务器过载',
+    },
+    [ErrorCode.TIMEOUT]: {
+      'en-US': 'Operation timeout',
+      'zh-CN': '操作超时',
+    },
+    [ErrorCode.FILE_TOO_LARGE]: {
+      'en-US': 'File is too large',
+      'zh-CN': '文件过大',
+    },
+    [ErrorCode.FILE_TYPE_NOT_ALLOWED]: {
+      'en-US': 'File type not allowed',
+      'zh-CN': '文件类型不允许',
+    },
+    [ErrorCode.CHUNK_UPLOAD_FAILED]: {
+      'en-US': 'Chunk upload failed',
+      'zh-CN': '分片上传失败',
+    },
+    [ErrorCode.INVALID_CHUNK_SIZE]: {
+      'en-US': 'Invalid chunk size',
+      'zh-CN': '无效的分片大小',
+    },
+    [ErrorCode.AUTHENTICATION_FAILED]: {
+      'en-US': 'Authentication failed',
+      'zh-CN': '认证失败',
+    },
+    [ErrorCode.AUTHORIZATION_FAILED]: {
+      'en-US': 'Authorization failed',
+      'zh-CN': '授权失败',
+    },
+    [ExtendedErrorCode.RESOURCE_NOT_FOUND]: {
+      'en-US': 'Resource not found',
+      'zh-CN': '资源未找到',
+    },
+    [ExtendedErrorCode.RESOURCE_CONFLICT]: {
+      'en-US': 'Resource conflict',
+      'zh-CN': '资源冲突',
+    },
+    [ExtendedErrorCode.UNSUPPORTED_MEDIA_TYPE]: {
+      'en-US': 'Unsupported media type',
+      'zh-CN': '不支持的媒体类型',
+    },
+  };
+
+  // 尝试获取本地化消息
+  const localizedMessages = errorMessages[code];
+  if (localizedMessages) {
+    return localizedMessages[locale] || fallbackMessage || code.toString();
+  }
+
+  // 如果没有找到本地化消息，返回原始消息或代码
+  return fallbackMessage || code.toString();
 }

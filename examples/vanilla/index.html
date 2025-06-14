@@ -96,11 +96,40 @@
       font-size: 14px;
       color: #666;
     }
+
+    /* 导航样式 */
+    .nav-links {
+      display: flex;
+      margin-bottom: 20px;
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+    }
+
+    .nav-links a {
+      padding: 8px 16px;
+      margin-right: 10px;
+      text-decoration: none;
+      color: #333;
+      border-radius: 4px;
+      background-color: #f0f0f0;
+    }
+
+    .nav-links a:hover,
+    .nav-links a.active {
+      background-color: #2196F3;
+      color: white;
+    }
   </style>
 </head>
 
 <body>
   <h1>File Chunk Uploader - 最小化示例</h1>
+
+  <!-- 示例导航 -->
+  <div class="nav-links">
+    <a href="index.html" class="active">基本示例</a>
+    <a href="retry-visualization.html">重试状态可视化</a>
+  </div>
 
   <div class="container">
     <h2>文件上传</h2>

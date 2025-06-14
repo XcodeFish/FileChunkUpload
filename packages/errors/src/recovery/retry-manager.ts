@@ -9,7 +9,7 @@ import { IUploadError, IRetryConfig } from '@file-chunk-uploader/types';
 import { CountdownManager, createCountdownManager } from './countdown-manager';
 import { NetworkDetector, createNetworkDetector } from './network-detector';
 import { ProgressTracker, createProgressTracker } from './progress-tracker';
-import { RetryDecisionMaker } from './retry-decision-maker';
+import { RetryDecisionMaker, createRetryDecisionMaker } from './retry-decision';
 import { RetryEventManager, createRetryEventManager } from './retry-events';
 import { RetryStateManager, createRetryStateManager } from './retry-state';
 import { RetryStateStorage, createRetryStateStorage } from './retry-state-storage';
@@ -155,7 +155,7 @@ export class DefaultRetryManager implements IRetryManager {
     this.stateManager = createRetryStateManager(this.storageManager);
 
     // 初始化决策器
-    this.decisionMaker = new RetryDecisionMaker({
+    this.decisionMaker = createRetryDecisionMaker({
       config: this.config,
       networkDetector: this.networkDetector,
     });
@@ -220,17 +220,19 @@ export class DefaultRetryManager implements IRetryManager {
           });
 
           // 记录恢复的状态信息
-          console.info(
-            `已恢复文件 ${fileId} 的重试状态，成功次数: ${successfulRetries}, 失败次数: ${failedRetries}`,
-          );
+          // 使用 logger 或者移除 console.info
+          // console.info(
+          //   `已恢复文件 ${fileId} 的重试状态，成功次数: ${successfulRetries}, 失败次数: ${failedRetries}`,
+          // );
         }
 
         // 清理过期状态
         await this.stateStorage.cleanupExpiredStates();
 
-        console.info(`重试状态初始化完成，共恢复 ${activeStates.length} 个文件的重试状态`);
+        // console.info(`重试状态初始化完成，共恢复 ${activeStates.length} 个文件的重试状态`);
       } catch (err) {
-        console.error('初始化重试状态失败:', err);
+        // console.error('初始化重试状态失败:', err);
+        // 错误处理但不输出到控制台
       }
     }
 
@@ -273,8 +275,8 @@ export class DefaultRetryManager implements IRetryManager {
     for (const task of activeTasks) {
       const fileId = task.fileId;
       if (fileId) {
-        this.stateStorage.recordNetworkState(fileId, network).catch(err => {
-          console.warn(`记录文件 ${fileId} 的网络状态失败:`, err);
+        this.stateStorage.recordNetworkState(fileId, network).catch(_err => {
+          // console.warn(`记录文件 ${fileId} 的网络状态失败:`, _err);
         });
       }
     }
@@ -337,7 +339,7 @@ export class DefaultRetryManager implements IRetryManager {
       try {
         await this.stateStorage.recordNetworkState(context.fileId, currentNetwork);
       } catch (err) {
-        console.warn(`记录文件 ${context.fileId} 的网络状态失败:`, err);
+        // console.warn(`记录文件 ${context.fileId} 的网络状态失败:`, err);
       }
     }
 
@@ -387,7 +389,7 @@ export class DefaultRetryManager implements IRetryManager {
             error.code || 'unknown_error',
           );
         } catch (err) {
-          console.warn(`记录文件 ${context.fileId} 的重试失败失败:`, err);
+          // console.warn(`记录文件 ${context.fileId} 的重试失败失败:`, err);
         }
       }
 
@@ -415,7 +417,7 @@ export class DefaultRetryManager implements IRetryManager {
             error.code || 'unknown_error',
           );
         } catch (err) {
-          console.warn(`记录文件 ${context.fileId} 的重试失败失败:`, err);
+          // console.warn(`记录文件 ${context.fileId} 的重试失败失败:`, err);
         }
       }
 
@@ -423,7 +425,7 @@ export class DefaultRetryManager implements IRetryManager {
     }
 
     // 计算延迟时间
-    const delay = this.calculateDelay(context.retryCount);
+    const delay = this.calculateDelay(context.retryCount, error);
 
     // 创建重试任务ID
     const taskId = `retry_${context.fileId}_${context.retryCount}_${Date.now()}`;
@@ -513,7 +515,7 @@ export class DefaultRetryManager implements IRetryManager {
       try {
         await this.stateStorage.saveState(context.fileId, retryState);
       } catch (err) {
-        console.warn(`保存文件 ${context.fileId} 的重试状态失败:`, err);
+        // console.warn(`保存文件 ${context.fileId} 的重试状态失败:`, err);
 
         // 回退到基本状态管理器
         await this.stateManager.saveRetryState(
@@ -533,53 +535,61 @@ export class DefaultRetryManager implements IRetryManager {
   }
 
   /**
-   * 获取成功计数
+   * 获取文件的成功重试次数
    * @param fileId 文件ID
-   * @returns 成功计数
+   * @returns 成功次数
    */
   private getSuccessCount(fileId: string): number {
-    return this.retryHistory.get(fileId)?.successCount || 0;
+    const stats = this.retryHistory.get(fileId);
+    return stats?.successCount || 0;
   }
 
   /**
-   * 获取失败次数
+   * 获取文件的失败重试次数
    * @param fileId 文件ID
    * @returns 失败次数
-   * @private
    */
   private getFailCount(fileId: string): number {
-    // 使用决策器的方法获取失败次数
-    return this.decisionMaker.getFailCount(fileId);
+    const stats = this.retryHistory.get(fileId);
+    return stats?.failCount || 0;
   }
 
   /**
    * 处理重试成功
-   * 更新成功计数，发送成功事件
-   * 使用智能决策器记录成功
-   *
+   * 记录成功统计，清理资源，发送成功事件
    * @param context 错误上下文
-   * @returns Promise<void>
    */
   async handleRetrySuccess(context: ExtendedErrorContext): Promise<void> {
-    await this.ensureInitialized();
-
     const fileId = context.fileId;
-    if (!fileId) return;
+    if (!fileId) {
+      return;
+    }
 
-    // 更新智能决策器中的成功记录
-    await this.decisionMaker.handleRetrySuccess(context);
+    // 更新重试统计
+    const retryStats = this.retryHistory.get(fileId) || {
+      successCount: 0,
+      failCount: 0,
+      lastRetryTime: 0,
+      networkConditions: [],
+    };
+    retryStats.successCount += 1;
+    retryStats.lastRetryTime = Date.now();
+    this.retryHistory.set(fileId, retryStats);
 
-    // 使用增强的状态存储记录成功
+    // 更新成功统计
+    this.decisionMaker.updateRetrySuccessStats(context);
+
+    // 异步持久化状态
     if (this.stateStorage) {
       try {
         await this.stateStorage.recordSuccess(fileId);
       } catch (err) {
-        console.warn(`记录文件 ${fileId} 的重试成功失败:`, err);
+        // console.warn(`保存文件 ${fileId} 的重试状态失败:`, err);
       }
     }
 
     // 发送重试成功事件
-    this.eventManager.emitRetrySuccess(context, this.getSuccessCount(fileId));
+    this.eventManager.emitRetrySuccess(context, retryStats.successCount);
   }
 
   /**
@@ -611,8 +621,8 @@ export class DefaultRetryManager implements IRetryManager {
 
     // 使用增强的状态存储记录失败
     if (this.stateStorage) {
-      this.stateStorage.recordFailure(fileId, error.message, error.code).catch(err => {
-        console.warn(`记录文件 ${fileId} 的重试失败失败:`, err);
+      this.stateStorage.recordFailure(fileId, error.message, error.code).catch(_err => {
+        // console.warn(`记录文件 ${fileId} 的重试失败失败:`, _err);
       });
     }
 
@@ -666,14 +676,12 @@ export class DefaultRetryManager implements IRetryManager {
 
   /**
    * 计算重试延迟时间
-   * 根据重试次数和配置计算下一次重试的延迟时间
-   *
+   * 使用指数退避算法或线性增长算法计算下次重试的延迟时间
    * @param retryCount 当前重试次数
-   * @param error 错误对象（可选）
+   * @param error 上传错误（可选）
    * @returns 延迟时间（毫秒）
    */
   private calculateDelay(retryCount: number, error?: IUploadError): number {
-    // 使用决策器的增强型智能重试延迟计算
     return this.decisionMaker.calculateRetryDelay(retryCount, error);
   }
 

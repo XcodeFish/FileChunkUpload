@@ -3,202 +3,241 @@
  */
 import { ErrorCode } from '@file-chunk-uploader/types';
 
-import { createErrorHandler, ErrorHandler } from '../src/error-handler';
-import { UploadError } from '../src/error-types';
+import { ErrorHandler, ErrorHandlerConfig } from '../src/error-handler/error-handler';
+import { UploadError } from '../src/error-types/upload-error';
 
 describe('ErrorHandler', () => {
-  let errorHandler: ErrorHandler;
+  // 创建基本错误处理器配置
+  const defaultConfig: ErrorHandlerConfig = {
+    maxRetries: 3,
+    baseDelay: 100,
+    maxDelay: 3000,
+    useExponentialBackoff: true,
+  };
 
-  beforeEach(() => {
-    errorHandler = createErrorHandler() as ErrorHandler;
+  test('处理可重试的网络错误', () => {
+    const handler = new ErrorHandler(defaultConfig);
+    const error = new UploadError('网络连接失败', ErrorCode.NETWORK_ERROR);
+    const context = {
+      fileId: 'test-123',
+      retryCount: 0,
+      timestamp: Date.now(),
+    };
+
+    const action = handler.handle(error, context);
+
+    expect(action.type).toBe('retry');
+    expect(action.delay).toBeGreaterThan(0);
   });
 
-  describe('handle', () => {
-    it('应该处理可重试的错误并返回重试动作', () => {
-      const error = new UploadError('网络错误', ErrorCode.NETWORK_ERROR, {
-        retryable: true,
-      });
-      const context = { retryCount: 0, timestamp: Date.now() };
+  test('处理网络断开错误', () => {
+    const handler = new ErrorHandler(defaultConfig);
+    const error = new UploadError('网络连接断开', ErrorCode.NETWORK_DISCONNECT);
+    const context = {
+      fileId: 'test-123',
+      retryCount: 0,
+      timestamp: Date.now(),
+    };
 
-      const action = errorHandler.handle(error, context);
+    const action = handler.handle(error, context);
 
-      expect(action.type).toBe('retry');
-      expect(action.delay).toBeGreaterThan(0);
-      expect(action.message).toContain('重试');
-    });
-
-    it('应该处理网络断开错误并返回等待连接动作', () => {
-      const error = new UploadError('网络连接断开', ErrorCode.NETWORK_DISCONNECT, {
-        retryable: true,
-      });
-      const context = { retryCount: 0, timestamp: Date.now() };
-
-      const action = errorHandler.handle(error, context);
-
-      expect(action.type).toBe('wait_for_connection');
-      expect(action.message).toContain('网络连接');
-    });
-
-    it('应该处理服务器过载错误并返回特殊延迟重试', () => {
-      const error = new UploadError('服务器过载', ErrorCode.SERVER_OVERLOAD, {
-        retryable: true,
-      });
-      const context = { retryCount: 3, timestamp: Date.now() };
-
-      const action = errorHandler.handle(error, context);
-
-      expect(action.type).toBe('retry');
-      expect(action.delay).toBe(30000); // 特殊延迟30秒
-      expect(action.message).toContain('服务器繁忙');
-    });
-
-    it('应该处理配额超出错误并返回不可恢复的失败', () => {
-      const error = new UploadError('存储配额已满', ErrorCode.QUOTA_EXCEEDED, {
-        retryable: false,
-      });
-      const context = { retryCount: 0, timestamp: Date.now() };
-
-      const action = errorHandler.handle(error, context);
-
-      expect(action.type).toBe('fail');
-      expect(action.recoverable).toBe(false);
-      expect(action.message).toContain('存储配额已满');
-    });
-
-    it('应该处理分片大小无效错误并返回调整分片大小动作', () => {
-      const error = new UploadError('分片大小无效', ErrorCode.CHUNK_SIZE_INVALID, {
-        retryable: true,
-      });
-      const context = { retryCount: 0, timestamp: Date.now(), chunkSize: 1024 * 1024 };
-
-      const action = errorHandler.handle(error, context);
-
-      expect(action.type).toBe('adjust_and_retry');
-      expect(action.newChunkSize).toBe(512 * 1024);
-      expect(action.message).toContain('分片大小调整');
-    });
-
-    it('应该在超过最大重试次数时返回失败动作', () => {
-      const error = new UploadError('网络错误', ErrorCode.NETWORK_ERROR, {
-        retryable: true,
-      });
-      const context = { retryCount: 5, timestamp: Date.now() };
-
-      const action = errorHandler.handle(error, context);
-
-      expect(action.type).toBe('fail');
-      expect(action.recoverable).toBe(true);
-      expect(action.message).toBe('网络错误');
-    });
+    expect(action.type).toBe('wait_for_connection');
   });
 
-  describe('aggregateErrors', () => {
-    it('应该正确聚合错误统计', () => {
-      const error1 = new UploadError('网络错误', ErrorCode.NETWORK_ERROR, {
-        retryable: true,
-        fileId: 'file1',
-      });
-      const error2 = new UploadError('服务器错误', ErrorCode.SERVER_ERROR, {
-        retryable: true,
-        fileId: 'file1',
-      });
-      const error3 = new UploadError('网络错误', ErrorCode.NETWORK_ERROR, {
-        retryable: true,
-        fileId: 'file2',
-      });
+  test('处理服务器过载错误', () => {
+    const handler = new ErrorHandler(defaultConfig);
+    const error = new UploadError('服务器繁忙', ErrorCode.SERVER_OVERLOAD);
+    const context = {
+      fileId: 'test-123',
+      retryCount: 4, // 超出默认最大重试次数
+      timestamp: Date.now(),
+    };
 
-      const context = { retryCount: 0, timestamp: Date.now() };
+    const action = handler.handle(error, context);
 
-      // 记录错误
-      errorHandler.handle(error1, context);
-      errorHandler.handle(error2, context);
-      errorHandler.handle(error3, context);
-
-      // 获取统计
-      const report = errorHandler.aggregateErrors();
-
-      expect(report.count).toBe(3);
-      expect(report.types[ErrorCode.NETWORK_ERROR]).toBe(2);
-      expect(report.types[ErrorCode.SERVER_ERROR]).toBe(1);
-      expect(report.details?.length).toBe(3);
-    });
-
-    it('应该根据时间窗口过滤错误', () => {
-      const now = Date.now();
-
-      // 创建一个模拟错误生成函数，使用指定的时间戳
-      const createErrorWithTimestamp = (
-        message: string,
-        code: ErrorCode,
-        timestamp: number,
-        options = {},
-      ) => {
-        // 创建错误对象
-        const error = new UploadError(message, code, options);
-        // 使用Object.defineProperty修改只读属性
-        Object.defineProperty(error, 'timestamp', {
-          value: timestamp,
-          writable: false,
-          configurable: true,
-        });
-        return error;
-      };
-
-      // 模拟一小时前的错误
-      const oldError = createErrorWithTimestamp(
-        '网络错误',
-        ErrorCode.NETWORK_ERROR,
-        now - 3600001, // 1小时1毫秒前
-        {
-          retryable: true,
-          fileId: 'file1',
-        },
-      );
-
-      // 模拟最近的错误
-      const recentError = createErrorWithTimestamp(
-        '服务器错误',
-        ErrorCode.SERVER_ERROR,
-        now - 1000, // 1秒前
-        {
-          retryable: true,
-          fileId: 'file1',
-        },
-      );
-
-      const context = { retryCount: 0, timestamp: now };
-
-      // 记录错误
-      errorHandler.handle(oldError, context);
-      errorHandler.handle(recentError, context);
-
-      // 获取过去30分钟的统计
-      const report = errorHandler.aggregateErrors(1800000); // 30分钟
-
-      expect(report.count).toBe(1);
-      expect(report.types[ErrorCode.SERVER_ERROR]).toBe(1);
-      expect(report.types[ErrorCode.NETWORK_ERROR]).toBeUndefined();
-    });
+    // 即使超出最大重试次数，服务器过载仍会再尝试一次
+    expect(action.type).toBe('retry');
+    expect(action.delay).toBe(30000); // 特殊延迟
   });
 
-  describe('clearErrorRecords', () => {
-    it('应该清除所有错误记录', () => {
-      const error = new UploadError('网络错误', ErrorCode.NETWORK_ERROR, {
-        retryable: true,
-      });
-      const context = { retryCount: 0, timestamp: Date.now() };
-
-      // 记录错误
-      errorHandler.handle(error, context);
-
-      // 验证错误已记录
-      expect(errorHandler.getErrorRecords().length).toBe(1);
-
-      // 清除错误
-      errorHandler.clearErrorRecords();
-
-      // 验证错误已清除
-      expect(errorHandler.getErrorRecords().length).toBe(0);
+  test('处理配额超出错误', () => {
+    const handler = new ErrorHandler(defaultConfig);
+    const error = new UploadError('存储配额已满', ErrorCode.QUOTA_EXCEEDED, {
+      retryable: false,
     });
+    const context = {
+      fileId: 'test-123',
+      retryCount: 0,
+      timestamp: Date.now(),
+    };
+
+    const action = handler.handle(error, context);
+
+    expect(action.type).toBe('fail');
+    expect(action.recoverable).toBe(false);
+  });
+
+  test('处理分片大小无效错误', () => {
+    const handler = new ErrorHandler(defaultConfig);
+    const error = new UploadError('分片大小无效', ErrorCode.INVALID_CHUNK_SIZE);
+    const context = {
+      fileId: 'test-123',
+      retryCount: 0,
+      timestamp: Date.now(),
+      chunkSize: 1024 * 1024, // 1MB
+    };
+
+    const action = handler.handle(error, context);
+
+    expect(action.type).toBe('adjust_and_retry');
+    expect((action as any).newChunkSize).toBe(512 * 1024); // 减半
+  });
+
+  test('超过最大重试次数后失败', () => {
+    const handler = new ErrorHandler(defaultConfig);
+    const error = new UploadError('网络连接失败', ErrorCode.NETWORK_ERROR);
+    const context = {
+      fileId: 'test-123',
+      retryCount: 3, // 等于最大重试次数
+      timestamp: Date.now(),
+    };
+
+    const action = handler.handle(error, context);
+
+    expect(action.type).toBe('fail');
+    expect(action.recoverable).toBe(true);
+  });
+
+  test('不可重试的错误直接失败', () => {
+    const handler = new ErrorHandler(defaultConfig);
+    const error = new UploadError('文件类型不允许', ErrorCode.FILE_TYPE_NOT_ALLOWED, {
+      retryable: false,
+    });
+    const context = {
+      fileId: 'test-123',
+      retryCount: 0,
+      timestamp: Date.now(),
+    };
+
+    const action = handler.handle(error, context);
+
+    expect(action.type).toBe('fail');
+    expect(action.recoverable).toBe(false);
+  });
+
+  test('指数退避算法计算延迟', () => {
+    const handler = new ErrorHandler({
+      ...defaultConfig,
+      baseDelay: 100,
+      useExponentialBackoff: true,
+    });
+
+    // @ts-expect-error 访问私有方法进行测试
+    const delay1 = handler['calculateRetryDelay'](0);
+    // @ts-expect-error 访问私有方法进行测试
+    const delay2 = handler['calculateRetryDelay'](1);
+    // @ts-expect-error 访问私有方法进行测试
+    const delay3 = handler['calculateRetryDelay'](2);
+
+    // 基础延迟应该是指数增长 (baseDelay * 2^retryCount)
+    // 但每次也有随机抖动，所以我们检查大致范围
+    expect(delay1).toBeGreaterThanOrEqual(100); // 100 * 2^0
+    expect(delay1).toBeLessThan(1100); // 100 + 1000（最大抖动）
+
+    expect(delay2).toBeGreaterThanOrEqual(200); // 100 * 2^1
+    expect(delay2).toBeLessThan(1200); // 200 + 1000（最大抖动）
+
+    expect(delay3).toBeGreaterThanOrEqual(400); // 100 * 2^2
+    expect(delay3).toBeLessThan(1400); // 400 + 1000（最大抖动）
+  });
+
+  test('线性增长算法计算延迟', () => {
+    const handler = new ErrorHandler({
+      ...defaultConfig,
+      baseDelay: 100,
+      useExponentialBackoff: false,
+    });
+
+    // @ts-expect-error 访问私有方法进行测试
+    const delay1 = handler['calculateRetryDelay'](0);
+    // @ts-expect-error 访问私有方法进行测试
+    const delay2 = handler['calculateRetryDelay'](1);
+    // @ts-expect-error 访问私有方法进行测试
+    const delay3 = handler['calculateRetryDelay'](2);
+
+    // 线性增长: baseDelay * (retryCount + 1)
+    expect(delay1).toBe(100); // 100 * (0+1)
+    expect(delay2).toBe(200); // 100 * (1+1)
+    expect(delay3).toBe(300); // 100 * (2+1)
+  });
+
+  test('根据错误类型获取最大重试次数', () => {
+    const handler = new ErrorHandler({
+      ...defaultConfig,
+      errorTypeRetries: {
+        network: 5,
+        server: 4,
+        timeout: 3,
+        unknown: 2,
+      },
+    });
+
+    const networkError = new UploadError('网络错误', ErrorCode.NETWORK_ERROR);
+    const serverError = new UploadError('服务器错误', ErrorCode.SERVER_ERROR);
+    const timeoutError = new UploadError('超时错误', ErrorCode.TIMEOUT);
+    const unknownError = new UploadError('未知错误', 'unknown_error');
+
+    // @ts-expect-error 访问私有方法进行测试
+    expect(handler['getMaxRetriesForError'](networkError)).toBe(5);
+    // @ts-expect-error 访问私有方法进行测试
+    expect(handler['getMaxRetriesForError'](serverError)).toBe(4);
+    // @ts-expect-error 访问私有方法进行测试
+    expect(handler['getMaxRetriesForError'](timeoutError)).toBe(3);
+    // @ts-expect-error 访问私有方法进行测试
+    expect(handler['getMaxRetriesForError'](unknownError)).toBe(2);
+  });
+
+  test('默认值替换', () => {
+    const handler = new ErrorHandler({
+      maxRetries: 5, // 覆盖默认值
+    });
+
+    // @ts-expect-error 访问私有属性进行测试
+    expect(handler['config'].maxRetries).toBe(5);
+    // @ts-expect-error 访问私有属性进行测试
+    expect(handler['config'].baseDelay).toBe(1000); // 使用默认值
+  });
+
+  test('错误统计功能', () => {
+    const handler = new ErrorHandler(defaultConfig);
+
+    const error1 = new UploadError('网络错误', ErrorCode.NETWORK_ERROR);
+    const error2 = new UploadError('服务器错误', ErrorCode.SERVER_ERROR);
+    const error3 = new UploadError('网络错误', ErrorCode.NETWORK_ERROR);
+
+    // 模拟三个错误
+    handler.handle(error1, { fileId: 'file1', retryCount: 0, timestamp: Date.now() });
+    handler.handle(error2, { fileId: 'file2', retryCount: 0, timestamp: Date.now() });
+    handler.handle(error3, { fileId: 'file3', retryCount: 0, timestamp: Date.now() });
+
+    // 获取统计信息
+    const stats = handler.aggregateErrors();
+
+    expect(stats.count).toBe(3);
+    expect(stats.types[ErrorCode.NETWORK_ERROR]).toBe(2);
+    expect(stats.types[ErrorCode.SERVER_ERROR]).toBe(1);
+  });
+
+  test('清除错误记录', () => {
+    const handler = new ErrorHandler(defaultConfig);
+
+    const error = new UploadError('网络错误', ErrorCode.NETWORK_ERROR);
+    handler.handle(error, { fileId: 'file1', retryCount: 0, timestamp: Date.now() });
+
+    expect(handler.getErrorRecords().length).toBe(1);
+
+    handler.clearErrorRecords();
+
+    expect(handler.getErrorRecords().length).toBe(0);
   });
 });

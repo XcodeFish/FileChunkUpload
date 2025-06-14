@@ -254,63 +254,53 @@ export class ErrorHandler implements IErrorHandler {
    * 记录错误
    * @param error 上传错误
    * @param isRetry 是否是重试
-   * @private
    */
   private recordError(error: IUploadError, isRetry: boolean): void {
     this.errorRecords.push({
       code: error.code,
       message: error.message,
       fileId: error.fileId,
-      timestamp: error.timestamp || Date.now(),
+      timestamp: Date.now(),
       retried: isRetry,
       details: error.details,
     });
 
-    // 限制记录数量，避免内存泄漏
-    if (this.errorRecords.length > 1000) {
-      this.errorRecords = this.errorRecords.slice(-1000);
+    // 限制错误记录数量，避免内存泄漏
+    if (this.errorRecords.length > 100) {
+      this.errorRecords = this.errorRecords.slice(-100);
     }
   }
 
   /**
-   * 记录详细错误日志
+   * 记录错误日志
    * @param error 上传错误
    * @param context 错误上下文
-   * @private
    */
   private logError(error: IUploadError, context: IErrorContext): void {
-    if (!this.logger) return;
+    if (!this.logger) {
+      return;
+    }
 
-    const errorInfo = {
-      code: error.code,
-      message: error.message,
-      fileId: error.fileId || context.fileId,
-      chunkIndex: error.chunkIndex || context.chunkIndex,
-      retryCount: context.retryCount,
-      timestamp: error.timestamp,
-      operation: error.operation || context.operation,
-      details: error.details,
-    };
+    const logPrefix = context.fileId ? `[文件:${context.fileId}]` : '';
+    const chunkInfo = context.chunkIndex !== undefined ? ` [分片:${context.chunkIndex}]` : '';
 
-    // 基本错误日志
-    this.logger.error('errors', `上传错误: [${error.code}] ${error.message}`, errorInfo);
-
-    // 详细错误跟踪
     if (this.config.verbose) {
-      if (error.originalError) {
-        this.logger.debug('errors', `原始错误: ${error.originalError.message}`, {
-          stack: error.originalError.stack,
-          name: error.originalError.name,
-        });
-      }
-
-      if (context.retryCount > 0) {
-        this.logger.debug('errors', `重试信息: 已重试 ${context.retryCount} 次`, {
-          chunkRetries: context.chunkRetries,
-          successfulRetries: context.successfulRetries,
-          failedRetries: context.failedRetries,
-        });
-      }
+      this.logger.error('error', `${logPrefix}${chunkInfo} 错误(${error.code}): ${error.message}`, {
+        error: {
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+          details: error.details,
+        },
+        context: {
+          fileId: context.fileId,
+          chunkIndex: context.chunkIndex,
+          retryCount: context.retryCount,
+          operation: context.operation,
+        },
+      });
+    } else {
+      this.logger.error('error', `${logPrefix}${chunkInfo} 错误(${error.code}): ${error.message}`);
     }
   }
 
@@ -319,22 +309,30 @@ export class ErrorHandler implements IErrorHandler {
    * @param error 上传错误
    * @param context 错误上下文
    * @param action 错误处理动作
-   * @private
    */
   private logRetryDecision(
     error: IUploadError,
     context: IErrorContext,
     action: IErrorAction,
   ): void {
-    if (!this.logger || !this.config.verbose) return;
+    if (!this.logger) {
+      return;
+    }
 
-    this.logger.info('errors', `决策: 重试上传 [${error.code}]`, {
-      fileId: error.fileId || context.fileId,
-      chunkIndex: error.chunkIndex || context.chunkIndex,
-      retryCount: context.retryCount,
-      delay: action.delay,
-      maxRetries: this.getMaxRetriesForError(error),
-    });
+    const logPrefix = context.fileId ? `[文件:${context.fileId}]` : '';
+    const chunkInfo = context.chunkIndex !== undefined ? ` [分片:${context.chunkIndex}]` : '';
+
+    this.logger.info(
+      'retry',
+      `${logPrefix}${chunkInfo} 重试决策: ${action.message}`,
+      this.config.verbose
+        ? {
+            error: { code: error.code, message: error.message },
+            retryCount: context.retryCount,
+            delay: action.delay,
+          }
+        : undefined,
+    );
   }
 
   /**
@@ -342,106 +340,118 @@ export class ErrorHandler implements IErrorHandler {
    * @param error 上传错误
    * @param context 错误上下文
    * @param action 错误处理动作
-   * @private
    */
   private logFailureDecision(
     error: IUploadError,
     context: IErrorContext,
     action: IErrorAction,
   ): void {
-    if (!this.logger || !this.config.verbose) return;
+    if (!this.logger) {
+      return;
+    }
 
-    this.logger.info('errors', `决策: 上传失败 [${error.code}]`, {
-      fileId: error.fileId || context.fileId,
-      chunkIndex: error.chunkIndex || context.chunkIndex,
-      retryCount: context.retryCount,
-      recoverable: action.recoverable,
-      maxRetries: this.getMaxRetriesForError(error),
-    });
+    const logPrefix = context.fileId ? `[文件:${context.fileId}]` : '';
+    const chunkInfo = context.chunkIndex !== undefined ? ` [分片:${context.chunkIndex}]` : '';
+
+    this.logger.error(
+      'error',
+      `${logPrefix}${chunkInfo} 失败决策: ${action.message}`,
+      this.config.verbose
+        ? {
+            error: { code: error.code, message: error.message },
+            retryCount: context.retryCount,
+            recoverable: action.recoverable,
+          }
+        : undefined,
+    );
   }
 
   /**
-   * 发送错误事件通知
+   * 发送错误通知
    * @param error 上传错误
    * @param context 错误上下文
-   * @private
    */
   private notifyError(error: IUploadError, context: IErrorContext): void {
-    if (!this.eventEmitter || !this.config.notifyOnError) return;
-
-    // 发出错误事件
-    this.eventEmitter.emit('error', {
-      error,
-      context,
-      timestamp: Date.now(),
-    });
-
-    // 发出特定错误类型事件
-    this.eventEmitter.emit(`error:${error.code}`, {
-      error,
-      context,
-      timestamp: Date.now(),
-    });
-
-    // 如果有文件ID，发出文件特定错误事件
-    if (error.fileId || context.fileId) {
-      const fileId = error.fileId || context.fileId;
-      this.eventEmitter.emit(`file:${fileId}:error`, {
-        error,
-        context,
-        timestamp: Date.now(),
-      });
+    if (!this.eventEmitter || !this.config.notifyOnError) {
+      return;
     }
+
+    // 转换错误和上下文为可序列化对象
+    const errorData = {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      fileId: error.fileId,
+      chunkIndex: error.chunkIndex,
+      details: error.details,
+      operation: error.operation,
+      timestamp: error.timestamp || Date.now(),
+    };
+
+    const contextData = {
+      fileId: context.fileId,
+      chunkIndex: context.chunkIndex,
+      retryCount: context.retryCount,
+      operation: context.operation,
+      timestamp: context.timestamp,
+    };
+
+    this.eventEmitter.emit('error', {
+      error: errorData,
+      context: contextData,
+    });
   }
 
   /**
-   * 计算重试延迟时间
-   * @param retryCount 当前重试次数
+   * 计算重试延迟
+   * @param retryCount 重试次数
    * @returns 延迟时间（毫秒）
-   * @private
    */
   private calculateRetryDelay(retryCount: number): number {
-    const { baseDelay, maxDelay, useExponentialBackoff } = this.config;
-
-    // 添加随机抖动，避免同时重试
-    const jitter = Math.random() * 1000; // 0-1000ms随机抖动
-
-    let delay: number;
-
-    if (useExponentialBackoff) {
-      // 指数退避算法: baseDelay * 2^retryCount
-      delay = baseDelay * Math.pow(2, retryCount);
+    if (this.config.useExponentialBackoff) {
+      // 使用指数退避算法
+      const baseDelay = this.config.baseDelay;
+      const maxDelay = this.config.maxDelay;
+      const jitter = Math.random() * 1000; // 0-1000ms随机抖动
+      const exponentialDelay = baseDelay * Math.pow(2, retryCount);
+      return Math.min(exponentialDelay + jitter, maxDelay);
     } else {
-      // 线性增长: baseDelay * (retryCount + 1)
-      delay = baseDelay * (retryCount + 1);
+      // 使用线性延迟
+      const delay = this.config.baseDelay * (retryCount + 1);
+      return Math.min(delay, this.config.maxDelay);
     }
-
-    // 添加抖动并限制最大延迟
-    return Math.min(delay + jitter, maxDelay);
   }
 
   /**
-   * 获取特定错误类型的最大重试次数
+   * 获取错误类型的最大重试次数
    * @param error 上传错误
    * @returns 最大重试次数
-   * @private
    */
   private getMaxRetriesForError(error: IUploadError): number {
-    const { maxRetries, errorTypeRetries } = this.config;
+    const { errorTypeRetries, maxRetries } = this.config;
 
     if (!errorTypeRetries) {
       return maxRetries;
     }
 
     // 根据错误代码确定错误类型
-    if (error.code.includes('network')) {
-      return errorTypeRetries.network ?? maxRetries;
-    } else if (error.code.includes('server')) {
-      return errorTypeRetries.server ?? maxRetries;
-    } else if (error.code.includes('timeout')) {
-      return errorTypeRetries.timeout ?? maxRetries;
+    if (
+      error.code.includes('network') ||
+      error.code === ErrorCode.NETWORK_ERROR ||
+      error.code === ErrorCode.NETWORK_DISCONNECT
+    ) {
+      return errorTypeRetries.network || maxRetries;
+    } else if (
+      error.code.includes('server') ||
+      error.code === ErrorCode.SERVER_ERROR ||
+      error.code === ErrorCode.SERVER_TIMEOUT ||
+      error.code === ErrorCode.SERVER_OVERLOAD
+    ) {
+      return errorTypeRetries.server || maxRetries;
+    } else if (error.code.includes('timeout') || error.code === ErrorCode.TIMEOUT) {
+      return errorTypeRetries.timeout || maxRetries;
     } else {
-      return errorTypeRetries.unknown ?? maxRetries;
+      return errorTypeRetries.unknown || maxRetries;
     }
   }
 }
@@ -449,8 +459,8 @@ export class ErrorHandler implements IErrorHandler {
 /**
  * 创建错误处理器
  * @param config 错误处理器配置
- * @param logger 日志记录器（可选）
- * @param eventEmitter 事件发射器（可选）
+ * @param logger 日志记录器
+ * @param eventEmitter 事件发射器
  * @returns 错误处理器实例
  */
 export function createErrorHandler(

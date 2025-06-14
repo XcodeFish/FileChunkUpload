@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@file-chunk-uploader/core": "workspace:*",
-    "@file-chunk-uploader/types": "workspace:*"
+    "@file-chunk-uploader/types": "workspace:*",
+    "@file-chunk-uploader/errors": "workspace:*"
   },
   "devDependencies": {
     "vite": "^4.3.9"

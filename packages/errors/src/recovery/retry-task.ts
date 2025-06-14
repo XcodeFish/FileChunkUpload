@@ -1,12 +1,12 @@
 /**
  * 重试任务管理器
- * 负责管理重试任务的创建、调度和执行
+ * 负责管理重试任务队列和任务执行
  * @packageDocumentation
  */
 
 import { CountdownManager } from './countdown-manager';
 import { ProgressTracker } from './progress-tracker';
-import { RetryDecisionMaker } from './retry-decision-maker';
+import { RetryDecisionMaker, createRetryDecisionMaker } from './retry-decision';
 import { RetryTask, RetryProgressInfo } from './retry-types';
 
 /**
@@ -239,7 +239,8 @@ export function createRetryTaskManager(
 ): RetryTaskManager {
   const countdownManager = options?.countdownManager || new CountdownManager();
   const progressTracker = options?.progressTracker || new ProgressTracker();
-  const retryDecisionMaker = options?.decisionMaker || decisionMaker || new RetryDecisionMaker({});
+  const retryDecisionMaker =
+    options?.decisionMaker || decisionMaker || createRetryDecisionMaker({});
 
   return new RetryTaskManager({
     countdownManager,
