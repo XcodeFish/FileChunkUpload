@@ -7,6 +7,25 @@
 import { ErrorCode, IUploadError } from '@file-chunk-uploader/types';
 
 /**
+ * 扩展错误代码
+ * 定义额外的错误代码，这些代码不在ErrorCode枚举中
+ */
+const ExtendedErrorCode = {
+  RESOURCE_NOT_FOUND: 'resource_not_found',
+  RESOURCE_CONFLICT: 'resource_conflict',
+  UNSUPPORTED_MEDIA_TYPE: 'unsupported_media_type',
+} as const;
+
+/**
+ * HTTP状态码处理结果接口
+ * @internal
+ */
+interface HttpStatusCodeResult {
+  code: ErrorCode | string;
+  retryable: boolean;
+}
+
+/**
  * UploadError类
  * 扩展Error类，实现IUploadError接口，提供更详细的上传错误信息
  */
@@ -41,8 +60,8 @@ export class UploadError extends Error implements IUploadError {
   /**
    * 构造函数
    * @param message 错误消息
-   * @param code 错误代码
-   * @param options 额外选项
+   * @param code 错误代码，默认为UNKNOWN_ERROR
+   * @param options 其他选项
    */
   constructor(
     message: string,
@@ -57,58 +76,165 @@ export class UploadError extends Error implements IUploadError {
     } = {},
   ) {
     super(message);
+
+    // 设置名称
     this.name = 'UploadError';
+
+    // 设置错误代码
     this.code = code;
+
+    // 设置是否可重试，优先使用options中的值，其次根据错误代码决定
+    this.retryable =
+      options.retryable !== undefined ? options.retryable : this.isRetryableByDefault(code);
+
+    // 设置错误发生时间戳
     this.timestamp = Date.now();
 
-    // 根据错误代码决定是否可重试
-    this.retryable = options.retryable ?? this.isRetryableByDefault(code);
-
-    // 保存其他选项
+    // 设置其他属性
     this.originalError = options.originalError;
     this.fileId = options.fileId;
     this.chunkIndex = options.chunkIndex;
     this.details = options.details;
     this.operation = options.operation;
+
+    // 初始化错误处理状态
     this.handled = false;
 
-    // 设置原型链 (解决ES5环境下的继承问题)
-    Object.setPrototypeOf(this, UploadError.prototype);
+    // 确保stack属性被正确捕获
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
   }
 
   /**
-   * 根据错误代码判断默认是否可重试
+   * 根据错误代码决定默认是否可重试
    * @param code 错误代码
    * @returns 是否可重试
+   * @private
    */
   private isRetryableByDefault(code: ErrorCode | string): boolean {
-    // 通常可重试的网络相关错误
-    const retryableCodes = [
+    // 可重试的错误类型
+    const retryableErrorCodes = [
       ErrorCode.NETWORK_ERROR,
-      ErrorCode.NETWORK_DISCONNECT,
-      ErrorCode.SERVER_TIMEOUT,
+      ErrorCode.SERVER_ERROR,
       ErrorCode.SERVER_OVERLOAD,
-      ErrorCode.REQUEST_FAILED,
-      ErrorCode.CHUNK_UPLOAD_FAILED,
       ErrorCode.TIMEOUT,
+      ErrorCode.CHUNK_UPLOAD_FAILED,
     ];
 
-    // 通常不可重试的错误
-    const nonRetryableCodes = [
-      ErrorCode.FILE_NOT_FOUND,
-      ErrorCode.FILE_TOO_LARGE,
-      ErrorCode.FILE_TYPE_NOT_ALLOWED,
-      ErrorCode.FILE_EMPTY,
-      ErrorCode.FILE_CORRUPTED,
-      ErrorCode.QUOTA_EXCEEDED,
-      ErrorCode.AUTHENTICATION_FAILED,
-      ErrorCode.AUTHORIZATION_FAILED,
-      ErrorCode.WORKER_NOT_SUPPORTED,
-    ];
+    return retryableErrorCodes.includes(code as ErrorCode);
+  }
 
-    return (
-      retryableCodes.includes(code as ErrorCode) && !nonRetryableCodes.includes(code as ErrorCode)
-    );
+  /**
+   * 根据HTTP状态码决定错误代码和是否可重试
+   * @param statusCode HTTP状态码
+   * @returns 错误代码和可重试状态
+   */
+  private static getErrorInfoFromStatusCode(statusCode?: number): HttpStatusCodeResult {
+    // 默认值
+    const result: HttpStatusCodeResult = {
+      code: ErrorCode.SERVER_ERROR,
+      retryable: true,
+    };
+
+    if (!statusCode) return result;
+
+    // 按HTTP状态码范围和具体状态码分组处理
+
+    // 1xx 信息性响应
+    if (statusCode >= 100 && statusCode < 200) {
+      // 信息性响应通常不会作为错误处理，但如果出现，视为服务器错误
+      result.code = ErrorCode.SERVER_ERROR;
+      result.retryable = true;
+    }
+    // 2xx 成功
+    else if (statusCode >= 200 && statusCode < 300) {
+      // 成功响应通常不会作为错误处理，但如果出现，视为服务器错误
+      result.code = ErrorCode.SERVER_ERROR;
+      result.retryable = true;
+    }
+    // 3xx 重定向
+    else if (statusCode >= 300 && statusCode < 400) {
+      // 重定向通常不会作为错误处理，但如果出现，视为服务器错误
+      result.code = ErrorCode.SERVER_ERROR;
+      result.retryable = true;
+    }
+    // 4xx 客户端错误
+    else if (statusCode >= 400 && statusCode < 500) {
+      // 客户端错误默认不可重试
+      result.retryable = false;
+
+      // 特殊状态码处理
+      switch (statusCode) {
+        case 400: // 错误请求
+          result.code = ErrorCode.INVALID_PARAMETER;
+          break;
+        case 401: // 未授权
+          result.code = ErrorCode.AUTHENTICATION_FAILED;
+          break;
+        case 403: // 禁止访问
+          result.code = ErrorCode.AUTHORIZATION_FAILED;
+          break;
+        case 404: // 资源未找到
+          result.code = ExtendedErrorCode.RESOURCE_NOT_FOUND;
+          break;
+        case 408: // 请求超时
+          result.code = ErrorCode.TIMEOUT;
+          result.retryable = true; // 超时错误可以重试
+          break;
+        case 409: // 资源冲突
+          result.code = ExtendedErrorCode.RESOURCE_CONFLICT;
+          break;
+        case 413: // 请求实体太大
+          result.code = ErrorCode.FILE_TOO_LARGE;
+          break;
+        case 415: // 不支持的媒体类型
+          result.code = ExtendedErrorCode.UNSUPPORTED_MEDIA_TYPE;
+          break;
+        case 429: // 请求过多
+          result.code = ErrorCode.SERVER_OVERLOAD;
+          result.retryable = true; // 请求过多可以稍后重试
+          break;
+        default: // 其他4xx错误
+          result.code = ErrorCode.SERVER_ERROR;
+          break;
+      }
+    }
+    // 5xx 服务器错误
+    else if (statusCode >= 500) {
+      // 服务器错误通常可重试
+      result.retryable = true;
+
+      // 特殊状态码处理
+      switch (statusCode) {
+        case 500: // 服务器内部错误
+          result.code = ErrorCode.SERVER_ERROR;
+          break;
+        case 501: // 未实现
+          result.code = ErrorCode.NOT_IMPLEMENTED;
+          result.retryable = false; // 未实现的功能重试也没用
+          break;
+        case 502: // 网关错误
+          result.code = ErrorCode.SERVER_ERROR;
+          break;
+        case 503: // 服务不可用
+          result.code = ErrorCode.SERVER_OVERLOAD;
+          break;
+        case 504: // 网关超时
+          result.code = ErrorCode.TIMEOUT;
+          break;
+        default: // 其他5xx错误
+          result.code = ErrorCode.SERVER_ERROR;
+          break;
+      }
+    }
+    // 未知状态码
+    else {
+      result.code = ErrorCode.UNKNOWN_ERROR;
+      result.retryable = false;
+    }
+
+    return result;
   }
 
   /**
@@ -162,30 +288,8 @@ export class UploadError extends Error implements IUploadError {
     statusCode?: number,
     options: Partial<Omit<IUploadError, 'message' | 'code' | 'retryable' | 'timestamp'>> = {},
   ): UploadError {
-    // 根据HTTP状态码决定错误代码和是否可重试
-    let code = ErrorCode.SERVER_ERROR;
-    let retryable = true;
-
-    if (statusCode) {
-      // 4xx客户端错误通常不可重试
-      if (statusCode >= 400 && statusCode < 500) {
-        retryable = false;
-        // 特殊状态码处理
-        if (statusCode === 401) {
-          code = ErrorCode.AUTHENTICATION_FAILED;
-        } else if (statusCode === 403) {
-          code = ErrorCode.AUTHORIZATION_FAILED;
-        } else if (statusCode === 413) {
-          code = ErrorCode.FILE_TOO_LARGE;
-        }
-      }
-      // 5xx服务器错误通常可重试
-      else if (statusCode >= 500) {
-        if (statusCode === 503) {
-          code = ErrorCode.SERVER_OVERLOAD;
-        }
-      }
-    }
+    // 使用提取的函数处理HTTP状态码
+    const { code, retryable } = UploadError.getErrorInfoFromStatusCode(statusCode);
 
     return new UploadError(message, code, {
       retryable,
@@ -363,6 +467,11 @@ const errorMessages: Record<string, Record<string, string>> = {
     [ErrorCode.AUTHORIZATION_FAILED]: '授权失败',
     [ErrorCode.TOKEN_EXPIRED]: '令牌已过期',
     [ErrorCode.SIGNATURE_INVALID]: '签名无效',
+
+    // 扩展错误代码
+    [ExtendedErrorCode.RESOURCE_NOT_FOUND]: '资源未找到',
+    [ExtendedErrorCode.RESOURCE_CONFLICT]: '资源冲突',
+    [ExtendedErrorCode.UNSUPPORTED_MEDIA_TYPE]: '不支持的媒体类型',
   },
   'en-US': {
     // 通用错误
@@ -420,6 +529,11 @@ const errorMessages: Record<string, Record<string, string>> = {
     [ErrorCode.AUTHORIZATION_FAILED]: 'Authorization failed',
     [ErrorCode.TOKEN_EXPIRED]: 'Token expired',
     [ErrorCode.SIGNATURE_INVALID]: 'Invalid signature',
+
+    // 扩展错误代码
+    [ExtendedErrorCode.RESOURCE_NOT_FOUND]: 'Resource not found',
+    [ExtendedErrorCode.RESOURCE_CONFLICT]: 'Resource conflict',
+    [ExtendedErrorCode.UNSUPPORTED_MEDIA_TYPE]: 'Unsupported media type',
   },
 };
 

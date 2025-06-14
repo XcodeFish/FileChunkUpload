@@ -168,7 +168,7 @@ importers:
         version: 15.0.1(rollup@3.15.0)
       '@rollup/plugin-terser':
         specifier: ^0.4.0
-        version: 0.4.0(rollup@3.15.0)
+        version: 0.4.0(rollup@3.29.5)
       '@rollup/plugin-typescript':
         specifier: ^12.1.2
         version: 12.1.2(rollup@3.29.5)(typescript@5.8.3)
@@ -215,6 +215,10 @@ importers:
       '@file-chunk-uploader/utils':
         specifier: 0.1.0
         version: link:../utils
+    devDependencies:
+      '@rollup/plugin-typescript':
+        specifier: ^12.1.2
+        version: 12.1.2(rollup@3.29.5)(typescript@5.8.3)
 
   packages/fast:
     dependencies:
@@ -264,13 +268,13 @@ importers:
   packages/network:
     dependencies:
       '@file-chunk-uploader/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
       '@file-chunk-uploader/types':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../types
       '@file-chunk-uploader/utils':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../utils
     devDependencies:
       '@rollup/plugin-commonjs':
@@ -349,7 +353,7 @@ importers:
         version: 15.0.1(rollup@3.15.0)
       '@rollup/plugin-terser':
         specifier: ^0.4.0
-        version: 0.4.0(rollup@3.15.0)
+        version: 0.4.0(rollup@3.29.5)
       '@rollup/plugin-typescript':
         specifier: ^11.0.0
         version: 11.1.5(rollup@3.15.0)(typescript@5.2.2)

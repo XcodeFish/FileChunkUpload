@@ -23,5 +23,8 @@
     "access": "public"
   },
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.2"
+  }
 }
