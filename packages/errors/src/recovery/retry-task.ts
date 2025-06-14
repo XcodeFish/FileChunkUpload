@@ -6,7 +6,7 @@
 
 import { CountdownManager } from './countdown-manager';
 import { ProgressTracker } from './progress-tracker';
-import { RetryDecisionMaker } from './retry-decision';
+import { RetryDecisionMaker } from './retry-decision-maker';
 import { RetryTask, RetryProgressInfo } from './retry-types';
 
 /**

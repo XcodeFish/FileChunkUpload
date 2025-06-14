@@ -4,12 +4,12 @@
  * @packageDocumentation
  */
 
-import { IUploadError, IRetryConfig, ErrorCode } from '@file-chunk-uploader/types';
+import { IUploadError, IRetryConfig } from '@file-chunk-uploader/types';
 
 import { CountdownManager, createCountdownManager } from './countdown-manager';
 import { NetworkDetector, createNetworkDetector } from './network-detector';
 import { ProgressTracker, createProgressTracker } from './progress-tracker';
-import { RetryDecisionMaker } from './retry-decision';
+import { RetryDecisionMaker } from './retry-decision-maker';
 import { RetryEventManager, createRetryEventManager } from './retry-events';
 import { RetryStateManager, createRetryStateManager } from './retry-state';
 import { RetryStateStorage, createRetryStateStorage } from './retry-state-storage';
@@ -295,6 +295,11 @@ export class DefaultRetryManager implements IRetryManager {
   /**
    * 处理重试
    * 根据错误和上下文决定是否重试，如何重试
+   * 应用智能重试决策逻辑，包括：
+   * 1. 基于历史成功率的智能决策
+   * 2. 基于网络质量的重试策略调整
+   * 3. 根据错误类型特定的重试策略
+   * 4. 自适应重试次数和间隔
    *
    * @param error 上传错误
    * @param context 错误上下文
@@ -324,8 +329,8 @@ export class DefaultRetryManager implements IRetryManager {
     // 记录网络状态
     this.recordNetworkState(currentNetwork);
 
-    // 更新重试统计
-    this.updateRetryStats(context, error);
+    // 更新重试决策器的统计信息
+    this.decisionMaker.updateRetryStats(context, error);
 
     // 如果提供了增强的状态存储，记录网络状态
     if (this.stateStorage) {
@@ -361,7 +366,35 @@ export class DefaultRetryManager implements IRetryManager {
     // 保存重试状态
     await this.saveRetryState(context);
 
-    // 检查是否超过最大重试次数
+    // 使用决策器决定是否应该重试
+    if (!this.decisionMaker.shouldRetry(context, error)) {
+      // 增强的决策器决定不再重试，发送重试失败事件
+      const maxRetries = this.config.maxRetries || 3;
+      this.eventManager.emitRetryFailed(
+        context,
+        error,
+        false,
+        this.getFailCount(context.fileId),
+        maxRetries,
+      );
+
+      // 如果提供了增强的状态存储，记录失败
+      if (this.stateStorage) {
+        try {
+          await this.stateStorage.recordFailure(
+            context.fileId,
+            error.message,
+            error.code || 'unknown_error',
+          );
+        } catch (err) {
+          console.warn(`记录文件 ${context.fileId} 的重试失败失败:`, err);
+        }
+      }
+
+      throw error;
+    }
+
+    // 检查是否超过基本最大重试次数
     const maxRetries = this.config.maxRetries || 3;
     if (context.retryCount >= maxRetries) {
       // 发送重试失败事件
@@ -443,45 +476,16 @@ export class DefaultRetryManager implements IRetryManager {
 
   /**
    * 更新重试统计数据
-   * 记录网络状况和重试时间
+   * 该方法已被弃用，改用 decisionMaker.updateRetryStats
    *
+   * @deprecated 使用 decisionMaker.updateRetryStats 替代
    * @param context 错误上下文
    * @param _error 错误对象
    * @private
    */
   private updateRetryStats(context: ExtendedErrorContext, _error: IUploadError): void {
-    const fileId = context.fileId;
-    if (!fileId) return;
-
-    let stats = this.retryHistory.get(fileId);
-    if (!stats) {
-      stats = {
-        successCount: 0,
-        failCount: 0,
-        lastRetryTime: 0,
-        networkConditions: [],
-      };
-      this.retryHistory.set(fileId, stats);
-    }
-
-    // 记录当前网络状况
-    const networkInfo = this.networkDetector.getCurrentNetwork();
-    const networkRecord: NetworkConditionRecord = {
-      time: Date.now(),
-      online: networkInfo.online,
-      type: networkInfo.type || 'unknown',
-      speed: networkInfo.speed || 0,
-      rtt: networkInfo.rtt || 0,
-    };
-    stats.networkConditions.push(networkRecord);
-
-    // 保留最近10条记录
-    if (stats.networkConditions.length > 10) {
-      stats.networkConditions.shift();
-    }
-
-    // 更新最后重试时间
-    stats.lastRetryTime = Date.now();
+    // 调用决策器的统计更新方法
+    this.decisionMaker.updateRetryStats(context, _error);
   }
 
   /**
@@ -538,17 +542,20 @@ export class DefaultRetryManager implements IRetryManager {
   }
 
   /**
-   * 获取失败计数
+   * 获取失败次数
    * @param fileId 文件ID
-   * @returns 失败计数
+   * @returns 失败次数
+   * @private
    */
   private getFailCount(fileId: string): number {
-    return this.retryHistory.get(fileId)?.failCount || 0;
+    // 使用决策器的方法获取失败次数
+    return this.decisionMaker.getFailCount(fileId);
   }
 
   /**
    * 处理重试成功
    * 更新成功计数，发送成功事件
+   * 使用智能决策器记录成功
    *
    * @param context 错误上下文
    * @returns Promise<void>
@@ -559,16 +566,8 @@ export class DefaultRetryManager implements IRetryManager {
     const fileId = context.fileId;
     if (!fileId) return;
 
-    // 更新重试历史记录
-    const stats = this.retryHistory.get(fileId) || {
-      successCount: 0,
-      failCount: 0,
-      lastRetryTime: Date.now(),
-      networkConditions: [],
-    };
-
-    stats.successCount += 1;
-    this.retryHistory.set(fileId, stats);
+    // 更新智能决策器中的成功记录
+    await this.decisionMaker.handleRetrySuccess(context);
 
     // 使用增强的状态存储记录成功
     if (this.stateStorage) {
@@ -580,7 +579,7 @@ export class DefaultRetryManager implements IRetryManager {
     }
 
     // 发送重试成功事件
-    this.eventManager.emitRetrySuccess(context, stats.successCount);
+    this.eventManager.emitRetrySuccess(context, this.getSuccessCount(fileId));
   }
 
   /**
@@ -628,73 +627,6 @@ export class DefaultRetryManager implements IRetryManager {
   }
 
   /**
-   * 获取失败原因
-   * @param error 上传错误
-   * @returns 失败原因描述
-   */
-  private getFailureReason(error: IUploadError): string {
-    switch (error.code) {
-      case ErrorCode.NETWORK_ERROR:
-        return '网络连接问题';
-      case ErrorCode.SERVER_ERROR:
-        return '服务器错误';
-      case ErrorCode.TIMEOUT:
-        return '请求超时';
-      case ErrorCode.OPERATION_CANCELED:
-        return '上传被中断';
-      default:
-        return error.message || '未知错误';
-    }
-  }
-
-  /**
-   * 获取建议操作
-   * @param error 上传错误
-   * @param context 错误上下文
-   * @returns 建议操作
-   */
-  private getSuggestedAction(
-    error: IUploadError,
-    context: ExtendedErrorContext,
-  ): 'cancel' | 'manual_retry' | 'wait_for_network' | 'reduce_chunk_size' {
-    // 网络错误建议等待网络
-    if (error.code === ErrorCode.NETWORK_ERROR) {
-      return 'wait_for_network';
-    }
-
-    // 如果重试次数已达上限，建议手动重试
-    if (context.retryCount && context.retryCount >= (this.config.maxRetries || 3)) {
-      return 'manual_retry';
-    }
-
-    // 如果是分片大小错误，建议减小分片大小
-    if (error.code === ErrorCode.INVALID_CHUNK_SIZE) {
-      return 'reduce_chunk_size';
-    }
-
-    // 默认建议取消
-    return 'cancel';
-  }
-
-  /**
-   * 清理资源
-   * @returns Promise<void>
-   */
-  async cleanup(): Promise<void> {
-    this.networkDetector.cleanup();
-    this.countdownManager.cleanup();
-    this.taskManager.cleanup();
-    this.decisionMaker.cleanup();
-
-    // 如果存在状态存储，也需要清理
-    if (this.stateStorage && typeof (this.stateStorage as any).cleanup === 'function') {
-      (this.stateStorage as any).cleanup();
-    }
-
-    this.initialized = false;
-  }
-
-  /**
    * 处理重试倒计时
    * 创建倒计时并设置进度回调
    *
@@ -737,22 +669,12 @@ export class DefaultRetryManager implements IRetryManager {
    * 根据重试次数和配置计算下一次重试的延迟时间
    *
    * @param retryCount 当前重试次数
+   * @param error 错误对象（可选）
    * @returns 延迟时间（毫秒）
    */
-  private calculateDelay(retryCount: number): number {
-    const { baseDelay = 1000, maxDelay = 30000, useExponentialBackoff = true } = this.config;
-
-    if (useExponentialBackoff) {
-      // 指数退避算法
-      const exponentialDelay = baseDelay * Math.pow(2, retryCount);
-      const jitter = Math.random() * 1000; // 添加随机抖动，避免多个请求同时重试
-      return Math.min(exponentialDelay + jitter, maxDelay);
-    } else {
-      // 线性退避算法
-      const linearDelay = baseDelay * (retryCount + 1);
-      const jitter = Math.random() * 500;
-      return Math.min(linearDelay + jitter, maxDelay);
-    }
+  private calculateDelay(retryCount: number, error?: IUploadError): number {
+    // 使用决策器的增强型智能重试延迟计算
+    return this.decisionMaker.calculateRetryDelay(retryCount, error);
   }
 
   /**
@@ -781,6 +703,24 @@ export class DefaultRetryManager implements IRetryManager {
       return this.stateStorage.loadState(fileId);
     }
     return null;
+  }
+
+  /**
+   * 清理资源
+   * @returns Promise<void>
+   */
+  async cleanup(): Promise<void> {
+    this.networkDetector.cleanup();
+    this.countdownManager.cleanup();
+    this.taskManager.cleanup();
+    this.decisionMaker.cleanup();
+
+    // 如果存在状态存储，也需要清理
+    if (this.stateStorage && typeof (this.stateStorage as any).cleanup === 'function') {
+      (this.stateStorage as any).cleanup();
+    }
+
+    this.initialized = false;
   }
 }
 
