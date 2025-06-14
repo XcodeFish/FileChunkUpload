@@ -5,14 +5,9 @@
  */
 
 import { FileUploader } from '@file-chunk-uploader/core/src/core';
-import {
-  fetchAdapter,
-  xhrAdapter,
-  customAdapter,
-  FetchAdapter,
-  XhrAdapter,
-} from '@file-chunk-uploader/network';
 import { IRequestConfig, IResponse, IProgressEvent } from '@file-chunk-uploader/types';
+
+import { fetchAdapter, xhrAdapter, customAdapter, FetchAdapter, XhrAdapter } from '../src';
 
 // 示例1: 使用Fetch适配器插件
 function useFetchAdapterExample(): void {
