@@ -5,6 +5,7 @@
  */
 
 import { StorageManager, RetryState } from './retry-types';
+import { StorageProvider, createStorageProvider } from './storage-provider';
 
 /**
  * 本地存储管理器实现
@@ -36,14 +37,29 @@ export class LocalStorageManager implements StorageManager {
   private expirationTime: number;
 
   /**
-   * 构造函数
-   * @param prefix 存储键前缀，默认为'retry_'
-   * @param expirationTime 存储条目过期时间(毫秒)，默认为24小时
+   * 存储提供者
+   * 用于操作实际存储媒介
    */
-  constructor(prefix: string = 'retry_', expirationTime: number = 24 * 60 * 60 * 1000) {
-    this.prefix = prefix;
-    this.activeUploadsKey = `${prefix}active_uploads`;
-    this.expirationTime = expirationTime;
+  private storageProvider: StorageProvider;
+
+  /**
+   * 构造函数
+   * @param options 配置选项
+   * @param options.prefix 存储键前缀，默认为'retry_'
+   * @param options.expirationTime 存储条目过期时间(毫秒)，默认为24小时
+   * @param options.storageProvider 存储提供者实例
+   */
+  constructor(
+    options: {
+      prefix?: string;
+      expirationTime?: number;
+      storageProvider?: StorageProvider;
+    } = {},
+  ) {
+    this.prefix = options.prefix || 'retry_';
+    this.activeUploadsKey = `${this.prefix}active_uploads`;
+    this.expirationTime = options.expirationTime || 24 * 60 * 60 * 1000;
+    this.storageProvider = options.storageProvider || createStorageProvider();
 
     // 启动时清理过期存储
     this.cleanupExpiredStorage().catch(err => {
@@ -53,14 +69,12 @@ export class LocalStorageManager implements StorageManager {
 
   /**
    * 保存重试状态
-   * 将重试状态序列化并存储到localStorage
+   * 将重试状态序列化并存储
    * @param fileId 文件ID
    * @param state 重试状态
    * @throws 如果序列化或存储过程中出错
    */
   async saveRetryState(fileId: string, state: RetryState): Promise<void> {
-    if (typeof localStorage === 'undefined') return;
-
     try {
       // 验证输入参数
       if (!fileId) {
@@ -77,9 +91,9 @@ export class LocalStorageManager implements StorageManager {
       // 序列化状态对象
       const serializedState = JSON.stringify(stateWithMeta);
 
-      // 保存到localStorage
+      // 通过存储提供者保存
       const key = this.getStorageKey(fileId);
-      localStorage.setItem(key, serializedState);
+      await this.storageProvider.setItem(key, serializedState);
 
       // 更新活动上传列表
       await this.addToActiveUploads(fileId);
@@ -91,18 +105,16 @@ export class LocalStorageManager implements StorageManager {
 
   /**
    * 获取重试状态
-   * 从localStorage读取并解析重试状态
+   * 读取并解析重试状态
    * @param fileId 文件ID
    * @returns 重试状态对象，若不存在则返回null
    * @throws 如果解析过程中出错
    */
   async getRetryState(fileId: string): Promise<RetryState | null> {
-    if (typeof localStorage === 'undefined') return null;
-
     try {
       // 获取存储键
       const key = this.getStorageKey(fileId);
-      const serializedState = localStorage.getItem(key);
+      const serializedState = await this.storageProvider.getItem(key);
 
       // 如果没有找到存储的状态，返回null
       if (!serializedState) return null;
@@ -138,10 +150,8 @@ export class LocalStorageManager implements StorageManager {
    * @returns 文件ID数组
    */
   async getActiveUploads(): Promise<string[]> {
-    if (typeof localStorage === 'undefined') return [];
-
     try {
-      const serialized = localStorage.getItem(this.activeUploadsKey);
+      const serialized = await this.storageProvider.getItem(this.activeUploadsKey);
       if (!serialized) return [];
 
       const activeUploads = JSON.parse(serialized);
@@ -158,7 +168,7 @@ export class LocalStorageManager implements StorageManager {
 
       // 错误时重置活动上传列表
       try {
-        localStorage.setItem(this.activeUploadsKey, '[]');
+        await this.storageProvider.setItem(this.activeUploadsKey, '[]');
       } catch (setErr) {
         // 设置失败不需处理
       }
@@ -168,16 +178,23 @@ export class LocalStorageManager implements StorageManager {
   }
 
   /**
+   * 删除重试状态
+   * 与clearRetryState功能相同，为兼容StorageManager接口
+   * @param fileId 文件ID
+   */
+  async deleteRetryState(fileId: string): Promise<void> {
+    return this.clearRetryState(fileId);
+  }
+
+  /**
    * 清除特定文件的重试状态
    * @param fileId 文件ID
    */
   async clearRetryState(fileId: string): Promise<void> {
-    if (typeof localStorage === 'undefined') return;
-
     try {
       // 移除存储的状态
       const key = this.getStorageKey(fileId);
-      localStorage.removeItem(key);
+      await this.storageProvider.removeItem(key);
 
       // 从活动上传列表移除
       await this.removeFromActiveUploads(fileId);
@@ -192,8 +209,6 @@ export class LocalStorageManager implements StorageManager {
    * 移除所有与重试相关的存储项
    */
   async clearAllRetryStates(): Promise<void> {
-    if (typeof localStorage === 'undefined') return;
-
     try {
       // 获取所有活动上传
       const activeUploads = await this.getActiveUploads();
@@ -201,11 +216,11 @@ export class LocalStorageManager implements StorageManager {
       // 逐个清除
       for (const fileId of activeUploads) {
         const key = this.getStorageKey(fileId);
-        localStorage.removeItem(key);
+        await this.storageProvider.removeItem(key);
       }
 
       // 清除活动上传列表
-      localStorage.removeItem(this.activeUploadsKey);
+      await this.storageProvider.removeItem(this.activeUploadsKey);
     } catch (err) {
       console.error('清除所有重试状态失败:', err);
       throw err;
@@ -218,8 +233,6 @@ export class LocalStorageManager implements StorageManager {
    * @private
    */
   private async cleanupExpiredStorage(): Promise<void> {
-    if (typeof localStorage === 'undefined') return;
-
     try {
       const activeUploads = await this.getActiveUploads();
       const now = Date.now();
@@ -229,7 +242,7 @@ export class LocalStorageManager implements StorageManager {
       for (const fileId of activeUploads) {
         try {
           const key = this.getStorageKey(fileId);
-          const serialized = localStorage.getItem(key);
+          const serialized = await this.storageProvider.getItem(key);
 
           if (serialized) {
             const state = JSON.parse(serialized);
@@ -265,8 +278,6 @@ export class LocalStorageManager implements StorageManager {
    * @private
    */
   private async addToActiveUploads(fileId: string): Promise<void> {
-    if (typeof localStorage === 'undefined') return;
-
     try {
       // 获取当前活动上传
       const activeUploads = await this.getActiveUploads();
@@ -275,7 +286,7 @@ export class LocalStorageManager implements StorageManager {
       if (!activeUploads.includes(fileId)) {
         // 添加到列表并保存
         activeUploads.push(fileId);
-        localStorage.setItem(this.activeUploadsKey, JSON.stringify(activeUploads));
+        await this.storageProvider.setItem(this.activeUploadsKey, JSON.stringify(activeUploads));
       }
     } catch (err) {
       console.error('添加到活动上传列表失败:', err);
@@ -289,8 +300,6 @@ export class LocalStorageManager implements StorageManager {
    * @private
    */
   private async removeFromActiveUploads(fileId: string): Promise<void> {
-    if (typeof localStorage === 'undefined') return;
-
     try {
       // 获取当前活动上传
       const activeUploads = await this.getActiveUploads();
@@ -299,7 +308,7 @@ export class LocalStorageManager implements StorageManager {
       const filteredUploads = activeUploads.filter(id => id !== fileId);
 
       // 保存更新后的列表
-      localStorage.setItem(this.activeUploadsKey, JSON.stringify(filteredUploads));
+      await this.storageProvider.setItem(this.activeUploadsKey, JSON.stringify(filteredUploads));
     } catch (err) {
       console.error('从活动上传列表移除失败:', err);
       throw err;
@@ -321,10 +330,16 @@ export class LocalStorageManager implements StorageManager {
 /**
  * 创建存储管理器
  * 工厂函数，创建并返回存储管理器实例
- * @param prefix 存储前缀
- * @param expirationTime 过期时间(毫秒)
+ * @param options 配置选项
+ * @param options.prefix 存储键前缀，默认为'retry_'
+ * @param options.expirationTime 存储条目过期时间(毫秒)，默认为24小时
+ * @param options.storageProvider 存储提供者实例
  * @returns 存储管理器实例
  */
-export function createStorageManager(prefix?: string, expirationTime?: number): StorageManager {
-  return new LocalStorageManager(prefix, expirationTime);
+export function createStorageManager(options?: {
+  prefix?: string;
+  expirationTime?: number;
+  storageProvider?: StorageProvider;
+}): StorageManager {
+  return new LocalStorageManager(options);
 }

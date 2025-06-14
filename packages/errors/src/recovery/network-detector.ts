@@ -1,10 +1,11 @@
 /**
- * 网络检测器实现
- * 用于监控网络状态变化和评估网络质量
+ * 网络检测器
+ * 负责检测网络状态变化和网络质量
  * @packageDocumentation
  */
 
 import { NetworkDetector, NetworkInfo } from './retry-types';
+export type { NetworkDetector } from './retry-types';
 
 /**
  * 扩展Navigator接口以包含connection属性
@@ -44,9 +45,10 @@ export class DefaultNetworkDetector implements NetworkDetector {
    */
   private currentNetwork: NetworkInfo = {
     online: typeof navigator !== 'undefined' ? navigator.onLine : true,
-    type: 'unknown',
+    type: 'unknown', // 初始值，将在构造函数中更新
     speed: 1,
     rtt: 100,
+    lastChecked: Date.now(),
   };
 
   /**
@@ -72,11 +74,35 @@ export class DefaultNetworkDetector implements NetworkDetector {
    * 初始化网络检测器并设置事件监听
    */
   constructor() {
+    // 检测初始网络类型并更新
+    const initialType = this.detectInitialNetworkType();
+    this.currentNetwork.type = initialType;
+
     // 初始化网络状态监听
     this.setupNetworkListeners();
 
     // 开始周期性网络质量测量
     this.startPeriodicSpeedTest();
+  }
+
+  /**
+   * 检测初始网络类型
+   * 使用Navigator.connection API或其他方法检测当前网络类型
+   * @returns 检测到的网络类型
+   * @private
+   */
+  private detectInitialNetworkType(): 'wifi' | 'cellular' | 'ethernet' | 'unknown' {
+    if (typeof navigator === 'undefined') return 'unknown';
+
+    const nav = navigator as NavigatorWithConnection;
+    if (nav.connection && nav.connection.type) {
+      return this.getNetworkType(nav.connection.type);
+    }
+
+    // 尝试使用其他方法检测网络类型
+    // 例如使用User-Agent或其他启发式方法
+
+    return 'unknown';
   }
 
   /**
@@ -238,6 +264,7 @@ export class DefaultNetworkDetector implements NetworkDetector {
     this.currentNetwork = {
       ...this.currentNetwork,
       ...status,
+      lastChecked: Date.now(), // 每次更新都刷新lastChecked时间戳
     };
 
     // 通知所有监听器
