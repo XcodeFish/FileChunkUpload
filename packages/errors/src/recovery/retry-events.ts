@@ -4,6 +4,8 @@
  * @packageDocumentation
  */
 
+import { IUploadError } from '@file-chunk-uploader/types';
+
 import {
   EventEmitter,
   RetryStartInfo,
@@ -14,6 +16,22 @@ import {
   ExtendedErrorContext,
   NetworkInfo,
 } from './retry-types';
+
+/**
+ * 等待网络连接恢复事件信息接口
+ */
+interface WaitingEventInfo {
+  /** 文件ID */
+  fileId?: string;
+  /** 分片索引 */
+  chunkIndex?: number;
+  /** 错误对象 */
+  error: IUploadError;
+  /** 网络信息 */
+  network: NetworkInfo;
+  /** 重试次数 */
+  retryCount: number;
+}
 
 /**
  * 重试事件管理器类
@@ -87,6 +105,24 @@ export class RetryEventManager {
 
     // 发送事件
     this.eventEmitter.emit('retry:start', retryStartInfo);
+  }
+
+  /**
+   * 发送等待网络连接恢复事件
+   * @param info 等待事件信息
+   */
+  emitWaitingEvent(info: WaitingEventInfo): void {
+    // 发送等待网络连接恢复事件
+    this.eventEmitter.emit('retry:waiting', {
+      fileId: info.fileId,
+      chunkIndex: info.chunkIndex,
+      error: info.error,
+      network: info.network,
+      retryCount: info.retryCount,
+      timestamp: Date.now(),
+      reason: 'waiting_for_network',
+      message: '等待网络连接恢复',
+    });
   }
 
   /**

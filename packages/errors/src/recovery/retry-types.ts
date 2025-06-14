@@ -448,6 +448,18 @@ export interface RetryManager {
   ): Promise<void>;
 
   /**
+   * 等待网络连接恢复后重试
+   * @param error 上传错误
+   * @param context 错误上下文
+   * @param handler 重试处理函数
+   */
+  waitForConnection(
+    error: IUploadError,
+    context: ExtendedErrorContext,
+    handler: () => Promise<void>,
+  ): Promise<void>;
+
+  /**
    * 处理重试成功
    * @param context 错误上下文
    */

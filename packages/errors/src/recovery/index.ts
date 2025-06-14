@@ -5,7 +5,7 @@
  */
 
 export { createRetryManager } from './retry-manager';
-export { RetryDecisionMaker, createRetryDecisionMaker, RetryErrorCode } from './retry-decision';
+export { RetryDecisionMaker, createRetryDecisionMaker } from './retry-decision';
 export { RetryQualityAnalyzer, createRetryQualityAnalyzer } from './retry-quality-analyzer';
 export { RetryStatsManager, createRetryStatsManager } from './retry-stats-manager';
 export { RetryErrorAnalyzer, createRetryErrorAnalyzer } from './retry-error-analyzer';

@@ -165,7 +165,15 @@ export class ErrorPlugin implements IPlugin {
    * 处理重试成功
    */
   private async handleRetrySuccess(uploader: any, context: IErrorContext): Promise<void> {
-    await this.retryManager.handleRetrySuccess(context);
+    // 将IErrorContext转换为ExtendedErrorContext
+    const extendedContext: ExtendedErrorContext = {
+      ...context,
+      timestamp: context.timestamp || Date.now(),
+      // 确保lastError是IUploadError类型
+      lastError: context.lastError as IUploadError | undefined,
+    };
+
+    await this.retryManager.handleRetrySuccess(extendedContext);
   }
 
   /**

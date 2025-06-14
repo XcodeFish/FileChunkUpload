@@ -730,6 +730,63 @@ export class DefaultRetryManager implements IRetryManager {
 
     this.initialized = false;
   }
+
+  /**
+   * 等待网络连接恢复后重试
+   * 当网络断开时，等待网络重新连接后再执行重试
+   *
+   * @param error 上传错误
+   * @param context 错误上下文
+   * @param handler 重试处理函数
+   */
+  async waitForConnection(
+    error: IUploadError,
+    context: ExtendedErrorContext,
+    handler: () => Promise<void>,
+  ): Promise<void> {
+    // 确保初始化完成
+    await this.ensureInitialized();
+
+    // 获取当前网络状态
+    const currentNetwork = this.networkDetector.getCurrentNetwork();
+
+    // 记录网络状态
+    if (this.stateStorage && context.fileId) {
+      try {
+        await this.stateStorage.recordNetworkState(context.fileId, currentNetwork);
+      } catch (_err) {
+        // 记录失败不影响主流程
+      }
+    }
+
+    // 发送等待事件
+    this.eventManager.emitWaitingEvent({
+      fileId: context.fileId,
+      chunkIndex: context.chunkIndex,
+      error,
+      network: currentNetwork,
+      retryCount: context.retryCount,
+    });
+
+    // 如果当前已在线，直接执行重试
+    if (currentNetwork.online) {
+      return this.retry(error, context, handler);
+    }
+
+    // 等待网络恢复
+    const unsubscribe = this.networkDetector.onNetworkChange(network => {
+      if (network.online) {
+        // 网络恢复后，取消监听并执行重试
+        unsubscribe();
+        this.retry(error, context, handler).catch(_err => {
+          // 错误处理
+        });
+      }
+    });
+
+    // 返回，不等待完成
+    return Promise.resolve();
+  }
 }
 
 /**
