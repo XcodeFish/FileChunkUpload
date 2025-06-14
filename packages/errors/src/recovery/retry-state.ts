@@ -4,7 +4,7 @@
  * @packageDocumentation
  */
 
-import { RetryState, StorageManager, ExtendedErrorContext } from './retry-types';
+import { RetryState, StorageManager, ExtendedErrorContext, BaseRetryState } from './retry-types';
 
 /**
  * 重试状态管理器类
@@ -47,7 +47,7 @@ export class RetryStateManager {
     if (!this.storageManager || !context.fileId) return;
 
     // 构建重试状态对象
-    const retryState: RetryState = {
+    const retryState: BaseRetryState = {
       fileId: context.fileId,
       retryCount: context.retryCount || 0,
       lastRetryTime: Date.now(),
@@ -57,10 +57,10 @@ export class RetryStateManager {
     };
 
     // 更新缓存
-    this.stateCache.set(context.fileId, retryState);
+    this.stateCache.set(context.fileId, retryState as RetryState);
 
     // 持久化存储
-    await this.storageManager.saveRetryState(context.fileId, retryState);
+    await this.storageManager.saveRetryState(context.fileId, retryState as RetryState);
   }
 
   /**
@@ -134,7 +134,7 @@ export class RetryStateManager {
    * @param updates 要更新的字段
    * @returns Promise<void>
    */
-  async updateRetryState(fileId: string, updates: Partial<RetryState>): Promise<void> {
+  async updateRetryState(fileId: string, updates: Partial<BaseRetryState>): Promise<void> {
     // 如果没有存储管理器，直接返回
     if (!this.storageManager) {
       return;
@@ -145,7 +145,7 @@ export class RetryStateManager {
       const currentState = await this.storageManager.getRetryState(fileId).catch(() => null);
 
       // 创建新状态
-      const newState: RetryState = currentState || {
+      const newState: BaseRetryState = currentState || {
         fileId,
         retryCount: 0,
         lastRetryTime: Date.now(),
@@ -158,7 +158,7 @@ export class RetryStateManager {
       Object.assign(newState, updates);
 
       // 保存更新后的状态
-      await this.storageManager.saveRetryState(fileId, newState);
+      await this.storageManager.saveRetryState(fileId, newState as RetryState);
     } catch (err) {
       console.warn(`更新文件 ${fileId} 的重试状态失败:`, err);
     }
@@ -213,6 +213,16 @@ export class RetryStateManager {
     } catch (err) {
       console.warn('清理重试状态失败:', err);
     }
+  }
+
+  /**
+   * 更新状态（updateRetryState的别名）
+   * @param fileId 文件ID
+   * @param state 重试状态
+   * @returns Promise<void>
+   */
+  async updateState(fileId: string, state: Partial<BaseRetryState>): Promise<void> {
+    return this.updateRetryState(fileId, state);
   }
 }
 

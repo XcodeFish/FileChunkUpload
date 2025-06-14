@@ -12,29 +12,19 @@ import { ProgressTracker, createProgressTracker } from './progress-tracker';
 import { RetryDecisionMaker } from './retry-decision';
 import { RetryEventManager, createRetryEventManager } from './retry-events';
 import { RetryStateManager, createRetryStateManager } from './retry-state';
+import { RetryStateStorage, createRetryStateStorage } from './retry-state-storage';
 import { RetryTaskManager } from './retry-task';
 import {
   RetryManager as IRetryManager,
   EventEmitter,
   StorageManager,
-  RetryTask,
   RetryManagerOptions,
-  NetworkConditionRecord,
-  NetworkInfo,
   ExtendedErrorContext,
+  NetworkInfo,
+  NetworkConditionRecord,
+  RetryState,
+  RetryCountdownInfo,
 } from './retry-types';
-
-/**
- * 默认重试配置
- * 定义重试机制的默认行为参数
- */
-const DEFAULT_RETRY_CONFIG: IRetryConfig = {
-  enabled: true,
-  maxRetries: 3,
-  baseDelay: 1000,
-  maxDelay: 30000,
-  useExponentialBackoff: true,
-};
 
 /**
  * 重试管理器实现类
@@ -128,6 +118,11 @@ export class DefaultRetryManager implements IRetryManager {
   private stateManager: RetryStateManager;
 
   /**
+   * 重试状态存储
+   */
+  private stateStorage?: RetryStateStorage;
+
+  /**
    * 事件管理器
    * 用于管理重试事件
    */
@@ -140,13 +135,14 @@ export class DefaultRetryManager implements IRetryManager {
    * @param options 重试管理器选项，包含配置、网络检测器、事件发射器和存储管理器
    */
   constructor(options: RetryManagerOptions = {}) {
-    // 合并默认配置和用户配置
-    this.config = {
-      ...DEFAULT_RETRY_CONFIG,
-      ...options.config,
+    this.config = options.config || {
+      enabled: true,
+      maxRetries: 3,
+      baseDelay: 1000,
+      maxDelay: 30000,
+      useExponentialBackoff: true,
     };
 
-    // 初始化依赖组件
     this.networkDetector = options.networkDetector || createNetworkDetector();
     this.eventEmitter = options.eventEmitter || {
       emit: () => {
@@ -154,67 +150,91 @@ export class DefaultRetryManager implements IRetryManager {
       },
     };
     this.storageManager = options.storageManager;
-
-    // 初始化倒计时管理器和进度追踪器
     this.countdownManager = options.countdownManager || createCountdownManager();
     this.progressTracker = options.progressTracker || createProgressTracker();
+    this.stateManager = createRetryStateManager(this.storageManager);
 
-    // 初始化决策器、任务管理器、状态管理器和事件管理器
+    // 初始化决策器
     this.decisionMaker = new RetryDecisionMaker({
       config: this.config,
       networkDetector: this.networkDetector,
     });
 
+    // 初始化任务管理器
     this.taskManager = new RetryTaskManager({
       countdownManager: this.countdownManager,
       progressTracker: this.progressTracker,
       decisionMaker: this.decisionMaker,
     });
 
-    this.stateManager = createRetryStateManager(this.storageManager);
     this.eventManager = createRetryEventManager(this.eventEmitter);
 
-    // 监听网络状态变化
-    this.networkDetector.onNetworkChange(this.handleNetworkChange.bind(this));
+    // 初始化增强的状态存储
+    if (this.storageManager && this.config.persistRetryState) {
+      this.stateStorage = createRetryStateStorage({
+        storageManager: this.storageManager,
+        enableSync: this.config.persistRetryState || false,
+      });
+    }
 
-    // 初始化重试状态
     this.initialize();
   }
 
   /**
    * 初始化重试管理器
-   * 从持久化存储加载重试状态，恢复之前的重试记录
-   *
-   * @returns Promise<void>
-   * @private
+   * 加载重试状态，设置事件监听器
    */
   private async initialize(): Promise<void> {
-    // 如果已初始化或没有存储管理器，则直接返回
-    if (this.initialized || !this.storageManager) {
-      this.initialized = true;
+    if (this.initialized) {
       return;
     }
 
-    try {
-      // 从存储加载所有重试状态
-      const states = await this.stateManager.loadAllRetryStates();
+    // 初始化网络检测器
+    this.networkDetector.onNetworkChange(network => {
+      this.handleNetworkChange(network);
+    });
 
-      // 恢复重试历史记录
-      for (const [fileId, state] of states.entries()) {
-        this.retryHistory.set(fileId, {
-          successCount: state.successfulRetries || 0,
-          failCount: state.failedRetries || 0,
-          lastRetryTime: state.lastRetryTime,
-          networkConditions: [], // 网络状况无法持久化，初始化为空数组
-        });
+    // 初始化增强的状态存储
+    if (this.storageManager && this.stateStorage) {
+      try {
+        // 加载所有活动状态
+        const activeStates = await this.stateStorage.getAllActiveStates();
+
+        // 恢复重试历史记录
+        for (const state of activeStates) {
+          const { fileId, successfulRetries, failedRetries, lastRetryTime, networkHistory } = state;
+
+          // 恢复重试历史统计
+          this.retryHistory.set(fileId, {
+            successCount: successfulRetries,
+            failCount: failedRetries,
+            lastRetryTime,
+            networkConditions:
+              networkHistory?.map(entry => ({
+                time: entry.timestamp,
+                online: entry.network.online,
+                type: entry.network.type || 'unknown',
+                speed: entry.network.speed || 0,
+                rtt: entry.network.rtt || 0,
+              })) || [],
+          });
+
+          // 记录恢复的状态信息
+          console.info(
+            `已恢复文件 ${fileId} 的重试状态，成功次数: ${successfulRetries}, 失败次数: ${failedRetries}`,
+          );
+        }
+
+        // 清理过期状态
+        await this.stateStorage.cleanupExpiredStates();
+
+        console.info(`重试状态初始化完成，共恢复 ${activeStates.length} 个文件的重试状态`);
+      } catch (err) {
+        console.error('初始化重试状态失败:', err);
       }
-
-      this.initialized = true;
-    } catch (err) {
-      console.warn('初始化重试状态失败:', err);
-      // 即使初始化失败，也标记为已初始化，避免反复尝试
-      this.initialized = true;
     }
+
+    this.initialized = true;
   }
 
   /**
@@ -228,10 +248,35 @@ export class DefaultRetryManager implements IRetryManager {
     // 发送网络状态变化事件
     this.eventManager.emitNetworkChange(network);
 
+    // 记录网络状态到重试历史记录
+    this.recordNetworkState(network);
+
     // 只在网络恢复在线时处理
     if (network.online) {
       // 网络恢复在线时，处理等待中的任务
       this.taskManager.processWaitingTasks();
+    }
+  }
+
+  /**
+   * 记录网络状态到重试历史记录
+   * @param network 当前网络状态
+   */
+  private recordNetworkState(network: NetworkInfo): void {
+    // 如果没有启用增强状态存储，则跳过
+    if (!this.stateStorage) return;
+
+    // 获取所有活动的重试任务
+    const activeTasks = this.taskManager.getActiveTasks();
+
+    // 为每个活动任务记录网络状态
+    for (const task of activeTasks) {
+      const fileId = task.fileId;
+      if (fileId) {
+        this.stateStorage.recordNetworkState(fileId, network).catch(err => {
+          console.warn(`记录文件 ${fileId} 的网络状态失败:`, err);
+        });
+      }
     }
   }
 
@@ -249,173 +294,138 @@ export class DefaultRetryManager implements IRetryManager {
 
   /**
    * 处理重试
-   * 根据错误和上下文信息决定是否重试，以及如何重试
+   * 根据错误和上下文决定是否重试，如何重试
    *
-   * @param error 错误对象
+   * @param error 上传错误
    * @param context 错误上下文
    * @param handler 重试处理函数
-   * @returns Promise<void>
    */
   async retry(
     error: IUploadError,
     context: ExtendedErrorContext,
     handler: () => Promise<void>,
   ): Promise<void> {
+    // 确保初始化完成
     await this.ensureInitialized();
 
-    // 检查是否启用重试
-    if (!this.config.enabled || !this.decisionMaker.isRetryable(error)) {
-      this.handleRetryFailure(context, error, false);
-      return;
+    // 如果重试功能未启用，直接抛出错误
+    if (!this.config.enabled) {
+      throw error;
     }
 
-    // 初始化或增加重试计数
+    // 确保上下文有fileId
+    if (!context.fileId) {
+      context.fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    }
+
+    // 获取当前网络状态
+    const currentNetwork = this.networkDetector.getCurrentNetwork();
+
+    // 记录网络状态
+    this.recordNetworkState(currentNetwork);
+
+    // 更新重试统计
+    this.updateRetryStats(context, error);
+
+    // 如果提供了增强的状态存储，记录网络状态
+    if (this.stateStorage) {
+      try {
+        await this.stateStorage.recordNetworkState(context.fileId, currentNetwork);
+      } catch (err) {
+        console.warn(`记录文件 ${context.fileId} 的网络状态失败:`, err);
+      }
+    }
+
+    // 确保重试次数在上下文中
     if (context.retryCount === undefined) {
       context.retryCount = 0;
     } else {
       context.retryCount++;
     }
 
-    // 检查是否超过最大重试次数
-    const maxRetries = this.config.maxRetries ?? DEFAULT_RETRY_CONFIG.maxRetries ?? 3;
-
-    if ((context.retryCount || 0) >= maxRetries) {
-      this.handleRetryFailure(context, error, false);
-      return;
+    // 确保分片重试记录在上下文中
+    if (!context.chunkRetries) {
+      context.chunkRetries = {};
     }
 
-    // 检查是否应该重试
-    if (!this.decisionMaker.shouldRetry(context)) {
-      this.handleRetryFailure(context, error, true);
-      return;
+    // 如果指定了分片索引，更新该分片的重试次数
+    if (context.chunkIndex !== undefined) {
+      const chunkIndex = context.chunkIndex;
+      context.chunkRetries[chunkIndex] = (context.chunkRetries[chunkIndex] || 0) + 1;
     }
 
-    // 更新重试统计
-    this.updateRetryStats(context, error);
-
-    // 计算延迟时间
-    const delay = this.decisionMaker.calculateRetryDelay(context.retryCount || 0);
-
-    // 创建任务ID
-    const taskId = `retry_${Date.now()}_${Math.random().toString(36).substring(2)}`;
-
-    // 确保上下文包含时间戳
-    if (!context.timestamp) {
-      context.timestamp = Date.now();
-    }
-
-    // 增加起始时间记录
-    if (!context.startTime) {
-      context.startTime = Date.now();
-    }
-
-    // 创建重试任务
-    const task: RetryTask = {
-      id: taskId,
-      fileId: context.fileId,
-      chunkIndex: context.chunkIndex,
-      type: 'retry',
-      scheduledTime: Date.now() + delay,
-      delay,
-      context,
-      error,
-      handler,
-      handled: false,
-      createdAt: Date.now(),
-    };
-
-    // 创建进度信息
-    const progressInfo = this.progressTracker.createProgress(
-      taskId,
-      context.retryCount || 0,
-      maxRetries,
-      context.chunkIndex,
-    );
-
-    // 创建倒计时并设置更新回调
-    const countdownInfo = this.countdownManager.createCountdown(taskId, delay, countdownInfo => {
-      // 获取任务进度信息
-      const progress = this.progressTracker.getProgress(taskId);
-
-      // 发送倒计时事件
-      this.eventManager.emitRetryCountdown(
-        taskId,
-        task.fileId,
-        task.chunkIndex,
-        countdownInfo,
-        progress || undefined,
-      );
-    });
-
-    // 发送重试开始事件
-    this.eventManager.emitRetryStart(context, error, taskId, delay, progressInfo, countdownInfo);
+    // 记录开始时间和最后错误
+    context.startTime = context.startTime || Date.now();
+    context.lastError = error;
 
     // 保存重试状态
     await this.saveRetryState(context);
 
-    // 添加任务到任务管理器
-    this.taskManager.addTask(task, task => this.executeTask(task));
-  }
+    // 检查是否超过最大重试次数
+    const maxRetries = this.config.maxRetries || 3;
+    if (context.retryCount >= maxRetries) {
+      // 发送重试失败事件
+      this.eventManager.emitRetryFailed(
+        context,
+        error,
+        false,
+        this.getFailCount(context.fileId),
+        maxRetries,
+      );
 
-  /**
-   * 执行重试任务
-   * 在计算的延迟后执行重试处理函数
-   *
-   * @param task 重试任务
-   * @returns Promise<void>
-   * @private
-   */
-  private async executeTask(task: RetryTask): Promise<void> {
-    try {
-      // 执行重试处理函数
-      await task.handler();
-
-      // 重试成功，处理成功回调
-      await this.handleRetrySuccess(task.context as ExtendedErrorContext);
-    } catch (err) {
-      // 重试失败，检查是否需要再次重试
-      if (this.isUploadError(err)) {
-        // 增加失败计数
-        if (task.context.retryCount) {
-          task.context.retryCount++;
-        } else {
-          task.context.retryCount = 1;
+      // 如果提供了增强的状态存储，记录失败
+      if (this.stateStorage) {
+        try {
+          await this.stateStorage.recordFailure(
+            context.fileId,
+            error.message,
+            error.code || 'unknown_error',
+          );
+        } catch (err) {
+          console.warn(`记录文件 ${context.fileId} 的重试失败失败:`, err);
         }
-
-        // 记录最后的错误
-        (task.context as ExtendedErrorContext).lastError = err;
-
-        // 更新进度信息
-        if (task.fileId) {
-          this.progressTracker.markFailed(task.id);
-        }
-
-        // 检查是否仍然可以重试
-        const maxRetries = this.config.maxRetries ?? DEFAULT_RETRY_CONFIG.maxRetries ?? 3;
-
-        if (
-          this.decisionMaker.isRetryable(err) &&
-          (task.context.retryCount || 0) < maxRetries &&
-          this.decisionMaker.shouldRetry(task.context as ExtendedErrorContext)
-        ) {
-          // 可以再次重试，递归调用retry方法
-          await this.retry(err, task.context as ExtendedErrorContext, task.handler);
-        } else {
-          // 无法再次重试，调用失败处理
-          this.handleRetryFailure(task.context as ExtendedErrorContext, err, false);
-        }
-      } else {
-        // 非上传错误，按原始错误处理
-        const uploadError: IUploadError = {
-          name: 'RetryError',
-          message: err instanceof Error ? err.message : String(err),
-          code: ErrorCode.REQUEST_FAILED,
-          retryable: false,
-          timestamp: Date.now(),
-        };
-        this.handleRetryFailure(task.context as ExtendedErrorContext, uploadError, false);
       }
+
+      throw error;
     }
+
+    // 计算延迟时间
+    const delay = this.calculateDelay(context.retryCount);
+
+    // 创建重试任务ID
+    const taskId = `retry_${context.fileId}_${context.retryCount}_${Date.now()}`;
+
+    // 发送重试开始事件
+    this.eventManager.emitRetryStart(context, error, taskId, delay);
+
+    // 处理倒计时
+    this.handleRetryCountdown(taskId, context.fileId, context.chunkIndex, delay);
+
+    // 执行重试任务
+    return new Promise((resolve, reject) => {
+      setTimeout(async () => {
+        try {
+          await handler();
+          // 重试成功
+          await this.handleRetrySuccess(context);
+          resolve();
+        } catch (retryError) {
+          // 重试失败
+          if (this.isUploadError(retryError)) {
+            // 递归调用retry
+            try {
+              await this.retry(retryError, context, handler);
+              resolve();
+            } catch (finalError) {
+              reject(finalError);
+            }
+          } else {
+            // 非上传错误，直接拒绝
+            reject(retryError);
+          }
+        }
+      }, delay);
+    });
   }
 
   /**
@@ -475,155 +485,302 @@ export class DefaultRetryManager implements IRetryManager {
   }
 
   /**
-   * 保存重试状态到持久化存储
-   * 将当前重试状态保存到存储管理器
+   * 保存重试状态
+   * 使用增强的状态存储功能保存重试状态
    *
    * @param context 错误上下文
    * @returns Promise<void>
-   * @private
    */
   private async saveRetryState(context: ExtendedErrorContext): Promise<void> {
-    const fileId = context.fileId;
-    if (!fileId) return;
+    // 如果没有文件ID或未启用状态存储，则跳过
+    if (!context.fileId) return;
 
-    const stats = this.retryHistory.get(fileId);
-    if (!stats) return;
+    // 尝试使用增强的状态存储
+    if (this.stateStorage) {
+      const retryState = {
+        fileId: context.fileId,
+        retryCount: context.retryCount || 0,
+        lastRetryTime: Date.now(),
+        chunkRetries: context.chunkRetries || {},
+        successfulRetries: this.getSuccessCount(context.fileId),
+        failedRetries: this.getFailCount(context.fileId),
+      };
 
-    await this.stateManager.saveRetryState(context, stats.successCount, stats.failCount);
-  }
+      try {
+        await this.stateStorage.saveState(context.fileId, retryState);
+      } catch (err) {
+        console.warn(`保存文件 ${context.fileId} 的重试状态失败:`, err);
 
-  /**
-   * 处理重试成功
-   * 更新重试成功统计，发送成功事件
-   *
-   * @param context 错误上下文
-   * @returns Promise<void>
-   */
-  async handleRetrySuccess(context: ExtendedErrorContext): Promise<void> {
-    // 更新统计信息
-    const fileId = context.fileId;
-    if (fileId) {
-      // 从重试历史中获取统计信息
-      let stats = this.retryHistory.get(fileId);
-      if (!stats) {
-        stats = {
-          successCount: 0,
-          failCount: 0,
-          lastRetryTime: 0,
-          networkConditions: [],
-        };
-        this.retryHistory.set(fileId, stats);
+        // 回退到基本状态管理器
+        await this.stateManager.saveRetryState(
+          context,
+          this.getSuccessCount(context.fileId),
+          this.getFailCount(context.fileId),
+        );
       }
-
-      // 更新成功计数
-      stats.successCount++;
-      stats.lastRetryTime = Date.now();
-
-      // 找到对应的重试任务
-      const taskId = this.taskManager.findTaskIdByFileId(fileId, context.chunkIndex);
-
-      // 更新任务进度
-      if (taskId) {
-        // 完成倒计时
-        this.countdownManager.completeCountdown(taskId);
-
-        // 更新进度信息
-        this.progressTracker.completeTask(taskId, true);
-      }
-
-      // 更新持久化存储
-      await this.stateManager.updateRetryState(fileId, {
-        successfulRetries: stats.successCount,
-        lastRetryTime: stats.lastRetryTime,
-      });
-
-      // 发送成功事件
-      this.eventManager.emitRetrySuccess(context, stats.successCount);
-    }
-  }
-
-  /**
-   * 处理重试失败
-   * 更新重试失败统计，发送失败事件
-   *
-   * @param context 错误上下文
-   * @param error 错误对象
-   * @param recoverable 是否可恢复
-   */
-  handleRetryFailure(
-    context: ExtendedErrorContext,
-    error: IUploadError,
-    recoverable: boolean,
-  ): void {
-    // 更新统计信息
-    const fileId = context.fileId;
-    if (fileId) {
-      // 从重试历史中获取统计信息
-      let stats = this.retryHistory.get(fileId);
-      if (!stats) {
-        stats = {
-          successCount: 0,
-          failCount: 0,
-          lastRetryTime: 0,
-          networkConditions: [],
-        };
-        this.retryHistory.set(fileId, stats);
-      }
-
-      // 更新失败计数
-      stats.failCount++;
-      stats.lastRetryTime = Date.now();
-
-      // 找到对应的重试任务
-      const taskId = this.taskManager.findTaskIdByFileId(fileId, context.chunkIndex);
-
-      // 更新任务进度
-      if (taskId) {
-        // 完成倒计时
-        this.countdownManager.completeCountdown(taskId);
-
-        // 更新进度信息
-        this.progressTracker.completeTask(taskId, false);
-      }
-
-      // 更新持久化存储
-      this.stateManager.updateRetryState(fileId, {
-        failedRetries: stats.failCount,
-        lastRetryTime: stats.lastRetryTime,
-      });
-
-      // 发送失败事件
-      this.eventManager.emitRetryFailed(
+    } else {
+      // 使用基本状态管理器
+      await this.stateManager.saveRetryState(
         context,
-        error,
-        recoverable,
-        stats.failCount,
-        this.config.maxRetries,
+        this.getSuccessCount(context.fileId),
+        this.getFailCount(context.fileId),
       );
     }
   }
 
   /**
-   * 清理资源
-   * 取消所有重试任务，清理资源
+   * 获取成功计数
+   * @param fileId 文件ID
+   * @returns 成功计数
+   */
+  private getSuccessCount(fileId: string): number {
+    return this.retryHistory.get(fileId)?.successCount || 0;
+  }
+
+  /**
+   * 获取失败计数
+   * @param fileId 文件ID
+   * @returns 失败计数
+   */
+  private getFailCount(fileId: string): number {
+    return this.retryHistory.get(fileId)?.failCount || 0;
+  }
+
+  /**
+   * 处理重试成功
+   * 更新成功计数，发送成功事件
    *
+   * @param context 错误上下文
+   * @returns Promise<void>
+   */
+  async handleRetrySuccess(context: ExtendedErrorContext): Promise<void> {
+    await this.ensureInitialized();
+
+    const fileId = context.fileId;
+    if (!fileId) return;
+
+    // 更新重试历史记录
+    const stats = this.retryHistory.get(fileId) || {
+      successCount: 0,
+      failCount: 0,
+      lastRetryTime: Date.now(),
+      networkConditions: [],
+    };
+
+    stats.successCount += 1;
+    this.retryHistory.set(fileId, stats);
+
+    // 使用增强的状态存储记录成功
+    if (this.stateStorage) {
+      try {
+        await this.stateStorage.recordSuccess(fileId);
+      } catch (err) {
+        console.warn(`记录文件 ${fileId} 的重试成功失败:`, err);
+      }
+    }
+
+    // 发送重试成功事件
+    this.eventManager.emitRetrySuccess(context, stats.successCount);
+  }
+
+  /**
+   * 处理重试失败
+   * 更新失败计数，发送失败事件
+   *
+   * @param context 错误上下文
+   * @param error 上传错误
+   * @param _recoverable 是否可恢复
+   */
+  handleRetryFailure(
+    context: ExtendedErrorContext,
+    error: IUploadError,
+    _recoverable: boolean,
+  ): void {
+    const fileId = context.fileId;
+    if (!fileId) return;
+
+    // 更新重试历史记录
+    const stats = this.retryHistory.get(fileId) || {
+      successCount: 0,
+      failCount: 0,
+      lastRetryTime: Date.now(),
+      networkConditions: [],
+    };
+
+    stats.failCount += 1;
+    this.retryHistory.set(fileId, stats);
+
+    // 使用增强的状态存储记录失败
+    if (this.stateStorage) {
+      this.stateStorage.recordFailure(fileId, error.message, error.code).catch(err => {
+        console.warn(`记录文件 ${fileId} 的重试失败失败:`, err);
+      });
+    }
+
+    // 发送重试失败事件
+    this.eventManager.emitRetryFailed(
+      context,
+      error,
+      false,
+      this.getFailCount(fileId),
+      this.config.maxRetries,
+    );
+  }
+
+  /**
+   * 获取失败原因
+   * @param error 上传错误
+   * @returns 失败原因描述
+   */
+  private getFailureReason(error: IUploadError): string {
+    switch (error.code) {
+      case ErrorCode.NETWORK_ERROR:
+        return '网络连接问题';
+      case ErrorCode.SERVER_ERROR:
+        return '服务器错误';
+      case ErrorCode.TIMEOUT:
+        return '请求超时';
+      case ErrorCode.OPERATION_CANCELED:
+        return '上传被中断';
+      default:
+        return error.message || '未知错误';
+    }
+  }
+
+  /**
+   * 获取建议操作
+   * @param error 上传错误
+   * @param context 错误上下文
+   * @returns 建议操作
+   */
+  private getSuggestedAction(
+    error: IUploadError,
+    context: ExtendedErrorContext,
+  ): 'cancel' | 'manual_retry' | 'wait_for_network' | 'reduce_chunk_size' {
+    // 网络错误建议等待网络
+    if (error.code === ErrorCode.NETWORK_ERROR) {
+      return 'wait_for_network';
+    }
+
+    // 如果重试次数已达上限，建议手动重试
+    if (context.retryCount && context.retryCount >= (this.config.maxRetries || 3)) {
+      return 'manual_retry';
+    }
+
+    // 如果是分片大小错误，建议减小分片大小
+    if (error.code === ErrorCode.INVALID_CHUNK_SIZE) {
+      return 'reduce_chunk_size';
+    }
+
+    // 默认建议取消
+    return 'cancel';
+  }
+
+  /**
+   * 清理资源
    * @returns Promise<void>
    */
   async cleanup(): Promise<void> {
-    // 清理任务管理器
-    this.taskManager.cleanup();
-
-    // 清理重试历史
-    this.retryHistory.clear();
-
-    // 清理倒计时管理器和进度追踪器
+    this.networkDetector.cleanup();
     this.countdownManager.cleanup();
-    this.progressTracker.clear();
+    this.taskManager.cleanup();
+    this.decisionMaker.cleanup();
 
-    // 清理网络检测器
-    if (this.networkDetector) {
-      this.networkDetector.cleanup();
+    // 如果存在状态存储，也需要清理
+    if (this.stateStorage && typeof (this.stateStorage as any).cleanup === 'function') {
+      (this.stateStorage as any).cleanup();
     }
+
+    this.initialized = false;
+  }
+
+  /**
+   * 处理重试倒计时
+   * 创建倒计时并设置进度回调
+   *
+   * @param taskId 任务ID
+   * @param fileId 文件ID
+   * @param chunkIndex 分片索引
+   * @param delay 延迟时间（毫秒）
+   */
+  private handleRetryCountdown(
+    taskId: string,
+    fileId?: string,
+    chunkIndex?: number,
+    delay?: number,
+  ): void {
+    if (!delay) return;
+
+    // 创建倒计时
+    const countdownInfo = this.countdownManager.createCountdown(
+      taskId,
+      delay,
+      (info: RetryCountdownInfo) => {
+        // 发送倒计时进度事件
+        this.eventEmitter.emit('retry:countdown', {
+          taskId,
+          fileId,
+          chunkIndex,
+          remainingTime: info.remainingTime,
+          totalDelay: info.totalDelay,
+          progressPercentage: info.progressPercentage,
+        });
+      },
+    );
+
+    // 发送倒计时事件
+    this.eventManager.emitRetryCountdown(taskId, fileId, chunkIndex, countdownInfo);
+  }
+
+  /**
+   * 计算重试延迟时间
+   * 根据重试次数和配置计算下一次重试的延迟时间
+   *
+   * @param retryCount 当前重试次数
+   * @returns 延迟时间（毫秒）
+   */
+  private calculateDelay(retryCount: number): number {
+    const { baseDelay = 1000, maxDelay = 30000, useExponentialBackoff = true } = this.config;
+
+    if (useExponentialBackoff) {
+      // 指数退避算法
+      const exponentialDelay = baseDelay * Math.pow(2, retryCount);
+      const jitter = Math.random() * 1000; // 添加随机抖动，避免多个请求同时重试
+      return Math.min(exponentialDelay + jitter, maxDelay);
+    } else {
+      // 线性退避算法
+      const linearDelay = baseDelay * (retryCount + 1);
+      const jitter = Math.random() * 500;
+      return Math.min(linearDelay + jitter, maxDelay);
+    }
+  }
+
+  /**
+   * 获取重试配置
+   * @returns 重试配置
+   */
+  getConfig(): IRetryConfig {
+    return { ...this.config };
+  }
+
+  /**
+   * 更新重试配置
+   * @param config 重试配置
+   */
+  updateConfig(config: Partial<IRetryConfig>): void {
+    this.config = { ...this.config, ...config };
+  }
+
+  /**
+   * 获取重试状态
+   * @param fileId 文件ID
+   * @returns 重试状态
+   */
+  async getRetryState(fileId: string): Promise<RetryState | null> {
+    if (this.stateStorage) {
+      return this.stateStorage.loadState(fileId);
+    }
+    return null;
   }
 }
 

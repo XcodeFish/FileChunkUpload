@@ -72,7 +72,8 @@ export class RetryEventManager {
             typeof navigator !== 'undefined' && 'connection' in navigator
               ? (navigator as any).connection?.type || 'unknown'
               : 'unknown',
-          lastChecked: Date.now(),
+          speed: 0,
+          rtt: 0,
         },
         isRetryRecommended: true,
       },
@@ -104,7 +105,12 @@ export class RetryEventManager {
       duration: context.startTime ? Date.now() - context.startTime : undefined,
       network: {
         online: navigator.onLine,
-        lastChecked: Date.now(),
+        type:
+          typeof navigator !== 'undefined' && 'connection' in navigator
+            ? (navigator as any).connection?.type || 'unknown'
+            : 'unknown',
+        speed: 0,
+        rtt: 0,
       },
       history: {
         totalRetries: context.retryCount || 0,
@@ -150,7 +156,12 @@ export class RetryEventManager {
       },
       network: {
         online: navigator.onLine,
-        lastChecked: Date.now(),
+        type:
+          typeof navigator !== 'undefined' && 'connection' in navigator
+            ? (navigator as any).connection?.type || 'unknown'
+            : 'unknown',
+        speed: 0,
+        rtt: 0,
       },
     };
 

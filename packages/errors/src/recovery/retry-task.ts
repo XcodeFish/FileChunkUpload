@@ -207,15 +207,24 @@ export class RetryTaskManager {
 
   /**
    * 清理资源
-   * 取消所有重试任务，清理资源
    */
   cleanup(): void {
-    // 取消所有定时器
-    for (const timerId of this.retryTimers.values()) {
+    // 清除所有定时器
+    this.retryTimers.forEach(timerId => {
       clearTimeout(timerId);
-    }
-    this.retryTimers.clear();
+    });
+
+    // 清空任务队列和定时器
     this.retryTasks.clear();
+    this.retryTimers.clear();
+  }
+
+  /**
+   * 获取所有活动的重试任务
+   * @returns 活动的重试任务数组
+   */
+  getActiveTasks(): RetryTask[] {
+    return Array.from(this.retryTasks.values());
   }
 }
 

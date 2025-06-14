@@ -223,20 +223,20 @@ export interface RetryFailedInfo {
 }
 
 /**
- * 重试网络信息
- * 提供重试网络环境信息
+ * 网络信息接口
+ * 描述当前网络状态
  */
 export interface NetworkInfo {
   /** 是否在线 */
   online: boolean;
   /** 网络类型 */
-  type?: 'wifi' | 'cellular' | 'ethernet' | 'unknown';
+  type: 'wifi' | 'cellular' | 'ethernet' | 'unknown';
   /** 网络速度（Mbps） */
-  speed?: number;
-  /** RTT（毫秒） */
-  rtt?: number;
+  speed: number;
+  /** 往返时间（毫秒） */
+  rtt: number;
   /** 最后检测时间 */
-  lastChecked: number;
+  lastChecked?: number;
 }
 
 /**
@@ -269,8 +269,25 @@ export interface RetryTask {
 }
 
 /**
+ * 重试任务队列接口
+ * 管理待执行的重试任务
+ */
+export interface RetryTaskQueue {
+  /** 添加任务 */
+  addTask(task: RetryTask): void;
+  /** 获取下一个任务 */
+  getNextTask(): RetryTask | null;
+  /** 获取所有任务 */
+  getAllTasks(): RetryTask[];
+  /** 获取任务数量 */
+  getTaskCount(): number;
+  /** 清空队列 */
+  clear(): void;
+}
+
+/**
  * 网络检测器接口
- * 提供网络状态检测功能
+ * 监控网络状态变化
  */
 export interface NetworkDetector {
   /** 获取当前网络状态 */
@@ -282,10 +299,10 @@ export interface NetworkDetector {
 }
 
 /**
- * 重试状态接口
- * 存储重试状态信息
+ * 基础重试状态接口
+ * 存储重试的基本信息
  */
-export interface RetryState {
+export interface BaseRetryState {
   /** 文件ID */
   fileId: string;
   /** 重试次数 */
@@ -301,8 +318,70 @@ export interface RetryState {
 }
 
 /**
+ * 网络历史记录条目
+ * 记录某个时间点的网络状态
+ */
+export interface NetworkHistoryEntry {
+  /** 记录时间 */
+  timestamp: number;
+  /** 网络状态 */
+  network: NetworkInfo;
+}
+
+/**
+ * 重试历史记录条目
+ * 记录重试结果
+ */
+export interface RetryHistoryEntry {
+  /** 重试时间 */
+  timestamp: number;
+  /** 是否成功 */
+  success: boolean;
+  /** 错误信息 */
+  errorMessage?: string;
+  /** 错误代码 */
+  errorCode?: string;
+}
+
+/**
+ * 同步状态信息
+ * 记录状态同步情况
+ */
+export interface SyncStatusInfo {
+  /** 是否已同步 */
+  synced: boolean;
+  /** 最后同步时间 */
+  lastSyncTime: number;
+  /** 同步目标 */
+  syncTarget?: string;
+}
+
+/**
+ * 完整重试状态接口
+ * 扩展基础状态，增加设备ID、会话ID和历史记录
+ */
+export interface RetryState extends BaseRetryState {
+  /** 设备标识符 */
+  deviceId: string;
+  /** 会话标识符 */
+  sessionId: string;
+  /** 创建时间戳 */
+  createdAt: number;
+  /** 更新时间戳 */
+  updatedAt: number;
+  /** 过期时间戳 */
+  expiresAt: number;
+  /** 网络状况历史记录 */
+  networkHistory: NetworkHistoryEntry[];
+  /** 重试历史记录 */
+  retryHistory: RetryHistoryEntry[];
+  /** 同步状态 */
+  syncStatus: SyncStatusInfo;
+}
+
+/**
  * 存储管理器接口
- * 提供重试状态持久化存储功能
+ * 提供重试状态的持久化存储
  */
 export interface StorageManager {
   /**
@@ -344,7 +423,7 @@ export interface StorageManager {
 
 /**
  * 事件发射器接口
- * 提供事件通知功能
+ * 用于发送事件通知
  */
 export interface EventEmitter {
   /** 发射事件 */
@@ -353,7 +432,7 @@ export interface EventEmitter {
 
 /**
  * 重试管理器接口
- * 定义重试管理器应提供的方法和功能
+ * 处理上传错误的重试
  */
 export interface RetryManager {
   /**
@@ -390,11 +469,28 @@ export interface RetryManager {
    * 清理资源
    */
   cleanup(): Promise<void>;
+
+  /**
+   * 获取重试配置
+   */
+  getConfig(): IRetryConfig;
+
+  /**
+   * 更新重试配置
+   * @param config 重试配置
+   */
+  updateConfig(config: Partial<IRetryConfig>): void;
+
+  /**
+   * 获取重试状态
+   * @param fileId 文件ID
+   */
+  getRetryState(fileId: string): Promise<RetryState | null>;
 }
 
 /**
  * 重试管理器选项接口
- * 配置重试管理器的行为
+ * 配置重试管理器
  */
 export interface RetryManagerOptions {
   /** 重试配置 */

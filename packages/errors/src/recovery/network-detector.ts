@@ -48,7 +48,6 @@ export class DefaultNetworkDetector implements NetworkDetector {
     type: 'unknown', // 初始值，将在构造函数中更新
     speed: 1,
     rtt: 100,
-    lastChecked: Date.now(),
   };
 
   /**
@@ -264,7 +263,6 @@ export class DefaultNetworkDetector implements NetworkDetector {
     this.currentNetwork = {
       ...this.currentNetwork,
       ...status,
-      lastChecked: Date.now(), // 每次更新都刷新lastChecked时间戳
     };
 
     // 通知所有监听器

@@ -34,3 +34,9 @@ export type { StorageProvider } from './storage-provider';
 
 // 导出类型定义
 export * from './retry-types';
+
+// 导出重试状态存储器
+export * from './retry-state-storage';
+
+// 导出存储管理器
+export * from './storage-manager';
