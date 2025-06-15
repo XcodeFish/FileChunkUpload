@@ -170,13 +170,12 @@ describe('ErrorHandler 事件通知和日志功能', () => {
     expect(action.type).toBe('fail');
     expect(action.recoverable).toBe(false);
 
-    // 查找失败决策日志
-    const decisionLog = logger.logs.find(
-      log => log.level === 'info' && log.message.includes('决策: 上传失败'),
-    );
-
-    expect(decisionLog).toBeDefined();
-    expect(decisionLog!.data).toHaveProperty('recoverable', false);
+    // 验证错误日志
+    const errorLog = logger.logs.find(log => log.level === 'error' && log.category === 'errors');
+    expect(errorLog).toBeDefined();
+    expect(errorLog!.data).toHaveProperty('code', 'quota_exceeded');
+    expect(errorLog!.data).toHaveProperty('retryable', false);
+    expect(errorLog!.data).toHaveProperty('fileId', 'file-1');
   });
 
   test('应该跳过日志记录和事件通知（当禁用时）', () => {

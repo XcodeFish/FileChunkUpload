@@ -74,7 +74,7 @@ export class UploadError extends Error implements IUploadError {
     if (options.retryable !== undefined) {
       this.retryable = options.retryable;
     } else {
-      this.retryable = this.isRetryableErrorCode(code);
+      this.retryable = true; // 默认可重试
     }
 
     // 确保原型链正确
@@ -112,11 +112,64 @@ export class UploadError extends Error implements IUploadError {
 
   /**
    * 获取本地化错误消息
-   * @param locale 语言代码
+   * @param localizer 本地化提供程序函数
    * @returns 本地化的错误消息
    */
-  getLocalizedMessage(locale: string = 'en-US'): string {
-    return getLocalizedErrorMessage(this.code, locale, this.message);
+  getLocalizedMessage(localizer?: (code: string) => string): string {
+    if (localizer) {
+      return localizer(this.code) || this.message;
+    }
+    return this.message;
+  }
+
+  /**
+   * 获取开发者模式下的详细错误信息
+   * @param devMode 是否启用开发者模式
+   * @returns 详细错误信息
+   */
+  getDeveloperMessage(devMode = false): string {
+    let message = `${this.message} [${this.code}]`;
+
+    if (devMode && this.originalError) {
+      message += `\n原始错误: ${this.originalError.message}`;
+      if (this.originalError.stack) {
+        message += `\n${this.originalError.stack}`;
+      }
+    }
+
+    if (devMode && this.details) {
+      message += `\n详细信息: ${JSON.stringify(this.details, null, 2)}`;
+    }
+
+    return message;
+  }
+
+  /**
+   * 从HTTP状态码创建错误
+   * @param statusCode HTTP状态码
+   * @param message 错误消息
+   * @param options 其他选项
+   * @returns 上传错误实例
+   */
+  static fromHttpStatus(
+    statusCode: number,
+    message: string = '请求失败',
+    options: {
+      fileId?: string;
+      chunkIndex?: number;
+      details?: Record<string, unknown>;
+      originalError?: Error;
+    } = {},
+  ): UploadError {
+    const result = handleHttpStatusCode(statusCode);
+
+    return new UploadError(message, result.code, {
+      retryable: result.retryable,
+      fileId: options.fileId,
+      chunkIndex: options.chunkIndex,
+      details: { ...(options.details || {}), statusCode },
+      originalError: options.originalError,
+    });
   }
 
   /**
@@ -334,7 +387,7 @@ function handleHttpStatusCode(statusCode?: number): HttpStatusCodeResult {
       case 429:
         return { code: ErrorCode.SERVER_OVERLOAD, retryable: true };
       default:
-        return { code: 'client_error', retryable: false };
+        return { code: ErrorCode.UNKNOWN_ERROR, retryable: false };
     }
   } else if (statusCode >= 500 && statusCode < 600) {
     // 5xx: 服务器错误
@@ -351,7 +404,7 @@ function handleHttpStatusCode(statusCode?: number): HttpStatusCodeResult {
   }
 
   // 其他状态码
-  return { code: 'unknown_status_code', retryable: false };
+  return { code: ErrorCode.UNKNOWN_ERROR, retryable: false };
 }
 
 /**

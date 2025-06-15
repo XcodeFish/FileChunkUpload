@@ -119,17 +119,26 @@ export class LocalStorageManager implements StorageManager {
       // 如果没有找到存储的状态，返回null
       if (!serializedState) return null;
 
-      // 解析JSON
-      const state = JSON.parse(serializedState);
+      try {
+        // 解析JSON
+        const state = JSON.parse(serializedState);
 
-      // 检查是否过期
-      if (state.expiration && state.expiration < Date.now()) {
-        // 状态已过期，清理并返回null
+        // 检查是否过期
+        if (state.expiration && state.expiration < Date.now()) {
+          // 状态已过期，清理并返回null
+          await this.clearRetryState(fileId);
+          return null;
+        }
+
+        return state;
+      } catch (parseError) {
+        // JSON解析失败
+        console.error(`解析文件 ${fileId} 的重试状态失败:`, parseError);
+
+        // 移除损坏的数据
         await this.clearRetryState(fileId);
         return null;
       }
-
-      return state;
     } catch (err) {
       console.error(`获取文件 ${fileId} 的重试状态失败:`, err);
 
@@ -245,30 +254,41 @@ export class LocalStorageManager implements StorageManager {
           const serialized = await this.storageProvider.getItem(key);
 
           if (serialized) {
-            const state = JSON.parse(serialized);
+            try {
+              const state = JSON.parse(serialized);
 
-            // 检查过期时间
-            if (state.expiration && state.expiration < now) {
-              // 已过期，添加到待清理列表
+              // 检查过期时间
+              if (state.expiration && state.expiration < now) {
+                expiredIds.push(fileId);
+              }
+            } catch (parseError) {
+              // JSON解析错误，认为数据已损坏，直接移除
               expiredIds.push(fileId);
             }
           } else {
-            // 存储项不存在，也应该从活动列表中移除
+            // 如果状态不存在但是在活动列表中，也添加到过期ID
             expiredIds.push(fileId);
           }
         } catch (err) {
-          // 错误时将此ID添加到过期列表
-          expiredIds.push(fileId);
+          // 单个文件处理错误不应阻止整体清理
+          console.error(`检查文件 ${fileId} 过期状态失败:`, err);
         }
       }
 
-      // 清理所有过期的存储项
-      for (const fileId of expiredIds) {
-        await this.clearRetryState(fileId);
+      // 清理所有过期状态
+      for (const expiredId of expiredIds) {
+        try {
+          await this.clearRetryState(expiredId);
+        } catch (err) {
+          console.error(`清理文件 ${expiredId} 的过期状态失败:`, err);
+        }
+      }
+
+      if (expiredIds.length > 0) {
+        console.log(`已清理 ${expiredIds.length} 个过期状态`);
       }
     } catch (err) {
-      console.warn('清理过期存储时发生错误:', err);
-      // 不抛出异常，让清理过程静默失败
+      console.error('清理过期存储失败:', err);
     }
   }
 
@@ -328,12 +348,10 @@ export class LocalStorageManager implements StorageManager {
 }
 
 /**
- * 创建存储管理器
- * 工厂函数，创建并返回存储管理器实例
- * @param options 配置选项
- * @param options.prefix 存储键前缀，默认为'retry_'
- * @param options.expirationTime 存储条目过期时间(毫秒)，默认为24小时
- * @param options.storageProvider 存储提供者实例
+ * 创建存储管理器实例
+ * 工厂函数，创建并配置一个新的LocalStorageManager实例
+ *
+ * @param options 存储管理器配置选项
  * @returns 存储管理器实例
  */
 export function createStorageManager(options?: {
@@ -341,5 +359,5 @@ export function createStorageManager(options?: {
   expirationTime?: number;
   storageProvider?: StorageProvider;
 }): StorageManager {
-  return new LocalStorageManager(options);
+  return new LocalStorageManager(options || {});
 }

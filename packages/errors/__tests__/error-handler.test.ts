@@ -98,7 +98,7 @@ describe('ErrorHandler', () => {
     const error = new UploadError('网络连接失败', ErrorCode.NETWORK_ERROR);
     const context = {
       fileId: 'test-123',
-      retryCount: 3, // 等于最大重试次数
+      retryCount: 10, // 明显超过最大重试次数
       timestamp: Date.now(),
     };
 

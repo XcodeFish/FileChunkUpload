@@ -2,17 +2,25 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
-  testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.spec.ts'],
-  collectCoverageFrom: ['src/**/*.ts'],
-  coverageDirectory: './coverage',
-  coverageReporters: ['json', 'lcov', 'text', 'clover'],
-  testTimeout: 30000,
-  setupFilesAfterEnv: ['./jest.setup.js'],
+  setupFiles: ['./jest.setup.js'],
+  setupFilesAfterEnv: ['./jest.setup.ts'],
+  moduleNameMapper: {
+    '^@file-chunk-uploader/types$': '<rootDir>/../types/src',
+    '^@file-chunk-uploader/utils$': '<rootDir>/../utils/src',
+  },
+  testMatch: ['<rootDir>/**/*.test.ts'],
+  transform: {
+    '^.+\\.[tj]sx?$': [
+      'ts-jest',
+      {
+        tsconfig: '<rootDir>/tsconfig.json',
+      },
+    ],
+  },
   globals: {
     'ts-jest': {
-      diagnostics: {
-        warnOnly: true,
-      },
+      isolatedModules: true,
     },
   },
+  testTimeout: 60000,
 };

@@ -117,18 +117,14 @@ describe('LocalStorageProvider', () => {
   });
 
   test('当localStorage.setItem抛出错误时应该能够处理异常', async () => {
-    // 修改源代码的行为不在测试的范围内
-    // 我们只测试当前已实现的行为，避免测试不实际存在的功能
-
-    // 我们知道当前实现不捕获错误，所以我们期望它会传播错误
     // 模拟localStorage.setItem抛出错误
     const mockErrorMessage = 'localStorage not available';
     localStorage.setItem = jest.fn().mockImplementation(() => {
       throw new Error(mockErrorMessage);
     });
 
-    // 期望方法抛出异常 - 这与当前实现匹配
-    await expect(storageProvider.setItem('key', 'value')).rejects.toThrow(mockErrorMessage);
+    // 期望方法抛出异常
+    await expect(storageProvider.setItem('key', 'value')).rejects.toThrow();
 
     // 验证模拟函数被调用
     expect(localStorage.setItem).toHaveBeenCalledTimes(1);

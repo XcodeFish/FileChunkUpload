@@ -116,23 +116,6 @@ export class ErrorHandler implements IErrorHandler {
     // 获取错误类型的最大重试次数
     const maxRetries = this.getMaxRetriesForError(error);
 
-    // 判断是否可重试
-    if (error.retryable && context.retryCount < maxRetries) {
-      // 计算重试延迟
-      const retryDelay = this.calculateRetryDelay(context.retryCount);
-
-      const action: IErrorAction = {
-        type: 'retry',
-        delay: retryDelay,
-        message: `将在${retryDelay / 1000}秒后重试（${context.retryCount + 1}/${maxRetries}）`,
-      };
-
-      // 记录重试决策日志
-      this.logRetryDecision(error, context, action);
-
-      return action;
-    }
-
     // 特定错误类型的处理策略
     switch (error.code) {
       case ErrorCode.NETWORK_DISCONNECT:
@@ -174,6 +157,23 @@ export class ErrorHandler implements IErrorHandler {
           }
         }
         break;
+    }
+
+    // 判断是否可重试，并且没有达到最大重试次数
+    if (error.retryable && context.retryCount < maxRetries) {
+      // 计算重试延迟
+      const retryDelay = this.calculateRetryDelay(context.retryCount);
+
+      const action: IErrorAction = {
+        type: 'retry',
+        delay: retryDelay,
+        message: `将在${retryDelay / 1000}秒后重试（${context.retryCount + 1}/${maxRetries}）`,
+      };
+
+      // 记录重试决策日志
+      this.logRetryDecision(error, context, action);
+
+      return action;
     }
 
     // 默认失败处理
@@ -281,26 +281,27 @@ export class ErrorHandler implements IErrorHandler {
       return;
     }
 
-    const logPrefix = context.fileId ? `[文件:${context.fileId}]` : '';
-    const chunkInfo = context.chunkIndex !== undefined ? ` [分片:${context.chunkIndex}]` : '';
+    const errorData = {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      fileId: error.fileId || context.fileId,
+      chunkIndex: error.chunkIndex || context.chunkIndex,
+      retryCount: context.retryCount,
+      timestamp: context.timestamp || Date.now(),
+    };
 
-    if (this.config.verbose) {
-      this.logger.error('error', `${logPrefix}${chunkInfo} 错误(${error.code}): ${error.message}`, {
-        error: {
-          code: error.code,
-          message: error.message,
-          retryable: error.retryable,
-          details: error.details,
-        },
-        context: {
-          fileId: context.fileId,
-          chunkIndex: context.chunkIndex,
-          retryCount: context.retryCount,
-          operation: context.operation,
-        },
-      });
-    } else {
-      this.logger.error('error', `${logPrefix}${chunkInfo} 错误(${error.code}): ${error.message}`);
+    this.logger.error(
+      'errors',
+      `上传错误 [${error.code}]: ${error.message}${
+        errorData.fileId ? ` (文件ID: ${errorData.fileId})` : ''
+      }${errorData.chunkIndex !== undefined ? ` (分片: ${errorData.chunkIndex})` : ''}`,
+      errorData,
+    );
+
+    // 记录原始错误详情（如果有）
+    if (this.config.verbose && error.originalError) {
+      this.logger.debug('errors', `原始错误: ${error.originalError.message}`, error.originalError);
     }
   }
 
@@ -315,23 +316,24 @@ export class ErrorHandler implements IErrorHandler {
     context: IErrorContext,
     action: IErrorAction,
   ): void {
-    if (!this.logger) {
+    if (!this.logger || !this.config.verbose) {
       return;
     }
 
-    const logPrefix = context.fileId ? `[文件:${context.fileId}]` : '';
-    const chunkInfo = context.chunkIndex !== undefined ? ` [分片:${context.chunkIndex}]` : '';
+    const logData = {
+      fileId: error.fileId || context.fileId,
+      chunkIndex: error.chunkIndex || context.chunkIndex,
+      retryCount: context.retryCount,
+      nextRetryIn: action.delay ? `${action.delay / 1000}秒` : '立即',
+      errorCode: error.code,
+    };
 
     this.logger.info(
       'retry',
-      `${logPrefix}${chunkInfo} 重试决策: ${action.message}`,
-      this.config.verbose
-        ? {
-            error: { code: error.code, message: error.message },
-            retryCount: context.retryCount,
-            delay: action.delay,
-          }
-        : undefined,
+      `决策: 重试上传${logData.fileId ? ` (文件ID: ${logData.fileId})` : ''}${
+        logData.chunkIndex !== undefined ? ` (分片: ${logData.chunkIndex})` : ''
+      } - ${action.message}`,
+      logData,
     );
   }
 
@@ -346,28 +348,29 @@ export class ErrorHandler implements IErrorHandler {
     context: IErrorContext,
     action: IErrorAction,
   ): void {
-    if (!this.logger) {
+    if (!this.logger || !this.config.verbose) {
       return;
     }
 
-    const logPrefix = context.fileId ? `[文件:${context.fileId}]` : '';
-    const chunkInfo = context.chunkIndex !== undefined ? ` [分片:${context.chunkIndex}]` : '';
+    const logData = {
+      fileId: error.fileId || context.fileId,
+      chunkIndex: error.chunkIndex || context.chunkIndex,
+      retryCount: context.retryCount,
+      errorCode: error.code,
+      recoverable: action.recoverable,
+    };
 
-    this.logger.error(
-      'error',
-      `${logPrefix}${chunkInfo} 失败决策: ${action.message}`,
-      this.config.verbose
-        ? {
-            error: { code: error.code, message: error.message },
-            retryCount: context.retryCount,
-            recoverable: action.recoverable,
-          }
-        : undefined,
+    this.logger.info(
+      'retry',
+      `决策: 上传失败${logData.fileId ? ` (文件ID: ${logData.fileId})` : ''}${
+        logData.chunkIndex !== undefined ? ` (分片: ${logData.chunkIndex})` : ''
+      } - ${action.message}${action.recoverable ? ' (可恢复)' : ' (不可恢复)'}`,
+      logData,
     );
   }
 
   /**
-   * 发送错误通知
+   * 发送错误事件通知
    * @param error 上传错误
    * @param context 错误上下文
    */
@@ -376,30 +379,39 @@ export class ErrorHandler implements IErrorHandler {
       return;
     }
 
-    // 转换错误和上下文为可序列化对象
-    const errorData = {
-      code: error.code,
-      message: error.message,
-      retryable: error.retryable,
-      fileId: error.fileId,
-      chunkIndex: error.chunkIndex,
-      details: error.details,
-      operation: error.operation,
-      timestamp: error.timestamp || Date.now(),
-    };
-
-    const contextData = {
-      fileId: context.fileId,
-      chunkIndex: context.chunkIndex,
-      retryCount: context.retryCount,
-      operation: context.operation,
-      timestamp: context.timestamp,
-    };
-
+    // 通用错误事件
     this.eventEmitter.emit('error', {
-      error: errorData,
-      context: contextData,
+      error,
+      context,
+      timestamp: Date.now(),
     });
+
+    // 错误类型特定事件
+    this.eventEmitter.emit(`error:${error.code}`, {
+      error,
+      context,
+      timestamp: Date.now(),
+    });
+
+    // 文件特定错误事件
+    if (error.fileId || context.fileId) {
+      const fileId = error.fileId || context.fileId;
+      this.eventEmitter.emit(`file:${fileId}:error`, {
+        error,
+        context,
+        timestamp: Date.now(),
+      });
+
+      // 分片特定错误事件
+      if (error.chunkIndex !== undefined || context.chunkIndex !== undefined) {
+        const chunkIndex = error.chunkIndex !== undefined ? error.chunkIndex : context.chunkIndex;
+        this.eventEmitter.emit(`file:${fileId}:chunk:${chunkIndex}:error`, {
+          error,
+          context,
+          timestamp: Date.now(),
+        });
+      }
+    }
   }
 
   /**

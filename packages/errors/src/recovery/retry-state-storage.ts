@@ -108,9 +108,9 @@ export interface RetryStateStorage {
   /**
    * 记录网络状态
    * @param fileId 文件ID
-   * @param network 网络信息
+   * @param networkInfo 网络信息
    */
-  recordNetworkState(fileId: string, network: NetworkInfo): Promise<StorageOperationResult>;
+  recordNetworkState(fileId: string, networkInfo: NetworkInfo): Promise<StorageOperationResult>;
 
   /**
    * 获取设备ID
@@ -214,10 +214,33 @@ export class DefaultRetryStateStorage implements RetryStateStorage {
         return null;
       }
 
-      // 转换为RetryState类型
+      // 确保返回完整的RetryState格式
+      const now = Date.now();
+      const isBaseState = !('deviceId' in state);
+
+      if (isBaseState) {
+        // 如果只有基本状态，则扩展为完整的RetryState
+        const baseState = state as BaseRetryState;
+        return {
+          ...baseState,
+          deviceId: this.deviceId,
+          sessionId: this.sessionId,
+          createdAt: now,
+          updatedAt: now,
+          expiresAt: now + this.expirationTime,
+          networkHistory: [],
+          retryHistory: [],
+          syncStatus: {
+            synced: false,
+            lastSyncTime: 0,
+          },
+        };
+      }
+
+      // 已经是完整的RetryState
       return state as RetryState;
     } catch (error) {
-      console.error('加载重试状态失败:', error);
+      console.error(`加载文件 ${fileId} 的重试状态失败:`, error);
       return null;
     }
   }
@@ -297,40 +320,76 @@ export class DefaultRetryStateStorage implements RetryStateStorage {
   /**
    * 记录重试成功
    * @param fileId 文件ID
-   * @returns 操作结果
    */
   async recordSuccess(fileId: string): Promise<StorageOperationResult> {
     try {
-      // 加载状态
-      const state = await this.loadState(fileId);
-      if (!state) return { success: false, operation: 'recordSuccess' };
+      // 加载当前状态
+      const currentState = await this.loadState(fileId);
+      if (!currentState) {
+        // 如果状态不存在，创建一个新的
+        const now = Date.now();
+        const newState: RetryState = {
+          fileId,
+          retryCount: 0,
+          lastRetryTime: now,
+          chunkRetries: {},
+          successfulRetries: 1,
+          failedRetries: 0,
+          deviceId: this.deviceId,
+          sessionId: this.sessionId,
+          createdAt: now,
+          updatedAt: now,
+          expiresAt: now + this.expirationTime,
+          networkHistory: [],
+          retryHistory: [
+            {
+              timestamp: now,
+              success: true,
+            },
+          ],
+          syncStatus: {
+            synced: false,
+            lastSyncTime: 0,
+          },
+        };
 
-      // 更新成功次数
-      state.successfulRetries = (state.successfulRetries || 0) + 1;
-      state.updatedAt = Date.now();
-
-      // 添加重试历史记录
-      if (!state.retryHistory) {
-        state.retryHistory = [];
+        await this.storageManager.saveRetryState(fileId, newState);
+        return {
+          success: true,
+          operation: 'recordSuccess',
+        };
       }
 
-      state.retryHistory.push({
-        timestamp: Date.now(),
-        success: true,
-      });
+      // 更新重试历史记录
+      const updatedState: RetryState = {
+        ...currentState,
+        successfulRetries: (currentState.successfulRetries || 0) + 1,
+        updatedAt: Date.now(),
+        retryHistory: [
+          ...(currentState.retryHistory || []),
+          {
+            timestamp: Date.now(),
+            success: true,
+          },
+        ],
+      };
 
-      // 限制历史记录数量
-      if (state.retryHistory.length > this.maxRetryHistoryLength) {
-        state.retryHistory = state.retryHistory.slice(-this.maxRetryHistoryLength);
+      // 限制历史记录长度
+      if (updatedState.retryHistory.length > this.maxRetryHistoryLength) {
+        updatedState.retryHistory = updatedState.retryHistory.slice(-this.maxRetryHistoryLength);
       }
 
       // 保存更新后的状态
-      await this.storageManager.saveRetryState(fileId, state);
-      return { success: true, operation: 'recordSuccess' };
+      await this.storageManager.saveRetryState(fileId, updatedState);
+
+      return {
+        success: true,
+        operation: 'recordSuccess',
+      };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error : new Error('未知错误'),
+        error: error as Error,
         operation: 'recordSuccess',
       };
     }
@@ -339,9 +398,8 @@ export class DefaultRetryStateStorage implements RetryStateStorage {
   /**
    * 记录重试失败
    * @param fileId 文件ID
-   * @param errorMessage 错误信息
+   * @param errorMessage 错误消息
    * @param errorCode 错误代码
-   * @returns 操作结果
    */
   async recordFailure(
     fileId: string,
@@ -349,38 +407,77 @@ export class DefaultRetryStateStorage implements RetryStateStorage {
     errorCode?: string,
   ): Promise<StorageOperationResult> {
     try {
-      // 加载状态
-      const state = await this.loadState(fileId);
-      if (!state) return { success: false, operation: 'recordFailure' };
+      // 加载当前状态
+      const currentState = await this.loadState(fileId);
+      if (!currentState) {
+        // 如果状态不存在，创建一个新的
+        const now = Date.now();
+        const newState: RetryState = {
+          fileId,
+          retryCount: 0,
+          lastRetryTime: now,
+          chunkRetries: {},
+          successfulRetries: 0,
+          failedRetries: 1,
+          deviceId: this.deviceId,
+          sessionId: this.sessionId,
+          createdAt: now,
+          updatedAt: now,
+          expiresAt: now + this.expirationTime,
+          networkHistory: [],
+          retryHistory: [
+            {
+              timestamp: now,
+              success: false,
+              errorMessage,
+              errorCode,
+            },
+          ],
+          syncStatus: {
+            synced: false,
+            lastSyncTime: 0,
+          },
+        };
 
-      // 更新失败次数
-      state.failedRetries = (state.failedRetries || 0) + 1;
-      state.updatedAt = Date.now();
-
-      // 添加重试历史记录
-      if (!state.retryHistory) {
-        state.retryHistory = [];
+        await this.storageManager.saveRetryState(fileId, newState);
+        return {
+          success: true,
+          operation: 'recordFailure',
+        };
       }
 
-      state.retryHistory.push({
-        timestamp: Date.now(),
-        success: false,
-        errorMessage,
-        errorCode,
-      });
+      // 更新重试历史记录
+      const updatedState: RetryState = {
+        ...currentState,
+        failedRetries: (currentState.failedRetries || 0) + 1,
+        updatedAt: Date.now(),
+        retryHistory: [
+          ...(currentState.retryHistory || []),
+          {
+            timestamp: Date.now(),
+            success: false,
+            errorMessage,
+            errorCode,
+          },
+        ],
+      };
 
-      // 限制历史记录数量
-      if (state.retryHistory.length > this.maxRetryHistoryLength) {
-        state.retryHistory = state.retryHistory.slice(-this.maxRetryHistoryLength);
+      // 限制历史记录长度
+      if (updatedState.retryHistory.length > this.maxRetryHistoryLength) {
+        updatedState.retryHistory = updatedState.retryHistory.slice(-this.maxRetryHistoryLength);
       }
 
       // 保存更新后的状态
-      await this.storageManager.saveRetryState(fileId, state);
-      return { success: true, operation: 'recordFailure' };
+      await this.storageManager.saveRetryState(fileId, updatedState);
+
+      return {
+        success: true,
+        operation: 'recordFailure',
+      };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error : new Error('未知错误'),
+        error: error as Error,
         operation: 'recordFailure',
       };
     }
@@ -389,39 +486,81 @@ export class DefaultRetryStateStorage implements RetryStateStorage {
   /**
    * 记录网络状态
    * @param fileId 文件ID
-   * @param network 网络信息
-   * @returns 操作结果
+   * @param networkInfo 网络信息
    */
-  async recordNetworkState(fileId: string, network: NetworkInfo): Promise<StorageOperationResult> {
+  async recordNetworkState(
+    fileId: string,
+    networkInfo: NetworkInfo,
+  ): Promise<StorageOperationResult> {
     try {
-      // 加载状态
-      const state = await this.loadState(fileId);
-      if (!state) return { success: false, operation: 'recordNetworkState' };
+      // 加载当前状态
+      const currentState = await this.loadState(fileId);
+      if (!currentState) {
+        // 如果状态不存在，创建一个新的
+        const now = Date.now();
+        const newState: RetryState = {
+          fileId,
+          retryCount: 0,
+          lastRetryTime: now,
+          chunkRetries: {},
+          successfulRetries: 0,
+          failedRetries: 0,
+          deviceId: this.deviceId,
+          sessionId: this.sessionId,
+          createdAt: now,
+          updatedAt: now,
+          expiresAt: now + this.expirationTime,
+          networkHistory: [
+            {
+              timestamp: now,
+              network: networkInfo,
+            },
+          ],
+          retryHistory: [],
+          syncStatus: {
+            synced: false,
+            lastSyncTime: 0,
+          },
+        };
 
-      // 添加网络历史记录
-      if (!state.networkHistory) {
-        state.networkHistory = [];
+        await this.storageManager.saveRetryState(fileId, newState);
+        return {
+          success: true,
+          operation: 'recordNetworkState',
+        };
       }
 
-      state.networkHistory.push({
-        timestamp: Date.now(),
-        network,
-      });
+      // 更新网络历史记录
+      const updatedState: RetryState = {
+        ...currentState,
+        updatedAt: Date.now(),
+        networkHistory: [
+          ...(currentState.networkHistory || []),
+          {
+            timestamp: Date.now(),
+            network: networkInfo,
+          },
+        ],
+      };
 
-      // 限制历史记录数量
-      if (state.networkHistory.length > this.maxNetworkHistoryLength) {
-        state.networkHistory = state.networkHistory.slice(-this.maxNetworkHistoryLength);
+      // 限制历史记录长度
+      if (updatedState.networkHistory.length > this.maxNetworkHistoryLength) {
+        updatedState.networkHistory = updatedState.networkHistory.slice(
+          -this.maxNetworkHistoryLength,
+        );
       }
-
-      state.updatedAt = Date.now();
 
       // 保存更新后的状态
-      await this.storageManager.saveRetryState(fileId, state);
-      return { success: true, operation: 'recordNetworkState' };
+      await this.storageManager.saveRetryState(fileId, updatedState);
+
+      return {
+        success: true,
+        operation: 'recordNetworkState',
+      };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error : new Error('未知错误'),
+        error: error as Error,
         operation: 'recordNetworkState',
       };
     }

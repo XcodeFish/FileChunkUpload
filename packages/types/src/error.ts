@@ -13,6 +13,7 @@ export enum ErrorCode {
   UNKNOWN_ERROR = 'unknown_error',
   NOT_IMPLEMENTED = 'not_implemented',
   OPERATION_CANCELED = 'operation_canceled',
+  OPERATION_FAILED = 'operation_failed',
   TIMEOUT = 'timeout',
   INVALID_PARAMETER = 'invalid_parameter',
 
@@ -45,6 +46,9 @@ export enum ErrorCode {
   QUOTA_EXCEEDED = 'quota_exceeded',
   STORAGE_READ_ERROR = 'storage_read_error',
   STORAGE_WRITE_ERROR = 'storage_write_error',
+
+  // 上传错误
+  UPLOAD_FAILED = 'upload_failed',
 
   // 插件错误
   PLUGIN_ERROR = 'plugin_error',

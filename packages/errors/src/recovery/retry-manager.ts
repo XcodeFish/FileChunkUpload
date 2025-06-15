@@ -296,13 +296,6 @@ export class DefaultRetryManager implements IRetryManager {
 
   /**
    * 处理重试
-   * 根据错误和上下文决定是否重试，如何重试
-   * 应用智能重试决策逻辑，包括：
-   * 1. 基于历史成功率的智能决策
-   * 2. 基于网络质量的重试策略调整
-   * 3. 根据错误类型特定的重试策略
-   * 4. 自适应重试次数和间隔
-   *
    * @param error 上传错误
    * @param context 错误上下文
    * @param handler 重试处理函数
@@ -312,155 +305,169 @@ export class DefaultRetryManager implements IRetryManager {
     context: ExtendedErrorContext,
     handler: () => Promise<void>,
   ): Promise<void> {
-    // 确保初始化完成
-    await this.ensureInitialized();
-
-    // 如果重试功能未启用，直接抛出错误
-    if (!this.config.enabled) {
-      throw error;
-    }
-
-    // 确保上下文有fileId
-    if (!context.fileId) {
-      context.fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    }
-
-    // 获取当前网络状态
-    const currentNetwork = this.networkDetector.getCurrentNetwork();
-
-    // 记录网络状态
-    this.recordNetworkState(currentNetwork);
-
-    // 更新重试决策器的统计信息
-    this.decisionMaker.updateRetryStats(context, error);
-
-    // 如果提供了增强的状态存储，记录网络状态
-    if (this.stateStorage) {
-      try {
-        await this.stateStorage.recordNetworkState(context.fileId, currentNetwork);
-      } catch (err) {
-        // console.warn(`记录文件 ${context.fileId} 的网络状态失败:`, err);
+    try {
+      await this.ensureInitialized();
+      if (!this.config.enabled) {
+        console.warn('重试管理器已禁用，不会执行重试');
+        return;
       }
-    }
 
-    // 确保重试次数在上下文中
-    if (context.retryCount === undefined) {
-      context.retryCount = 0;
-    } else {
-      context.retryCount++;
-    }
+      const fileId = context.fileId || 'unknown';
+      const { retryCount = 0 } = context;
+      const maxRetries = this.config.maxRetries || 3; // 设置默认值为3
 
-    // 确保分片重试记录在上下文中
-    if (!context.chunkRetries) {
-      context.chunkRetries = {};
-    }
+      // 检查重试次数是否达到上限
+      if (retryCount >= maxRetries) {
+        this.eventEmitter.emit('retry:max_retries', {
+          fileId,
+          error,
+          retryCount,
+        });
 
-    // 如果指定了分片索引，更新该分片的重试次数
-    if (context.chunkIndex !== undefined) {
-      const chunkIndex = context.chunkIndex;
-      context.chunkRetries[chunkIndex] = (context.chunkRetries[chunkIndex] || 0) + 1;
-    }
+        // 触发最终失败事件
+        this.eventEmitter.emit('retry:failed', {
+          fileId,
+          error,
+          reason: `达到最大重试次数 (${maxRetries})`,
+        });
 
-    // 记录开始时间和最后错误
-    context.startTime = context.startTime || Date.now();
-    context.lastError = error;
+        this.handleRetryFailure(context, error, false);
+        return;
+      }
 
-    // 保存重试状态
-    await this.saveRetryState(context);
+      // 更新重试统计
+      this.updateRetryStats(context, error);
 
-    // 使用决策器决定是否应该重试
-    if (!this.decisionMaker.shouldRetry(context, error)) {
-      // 增强的决策器决定不再重试，发送重试失败事件
-      const maxRetries = this.config.maxRetries || 3;
-      this.eventManager.emitRetryFailed(
-        context,
+      // 计算延迟时间
+      const delay = this.calculateDelay(retryCount, error);
+
+      // 生成唯一任务ID
+      const taskId = `${fileId}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+      // 发布重试开始事件
+      this.eventEmitter.emit('retry:scheduled', {
+        fileId,
+        taskId,
+        delay,
+        retryCount: retryCount + 1,
         error,
-        false,
-        this.getFailCount(context.fileId),
-        maxRetries,
-      );
+      });
 
-      // 如果提供了增强的状态存储，记录失败
-      if (this.stateStorage) {
-        try {
-          await this.stateStorage.recordFailure(
-            context.fileId,
-            error.message,
-            error.code || 'unknown_error',
-          );
-        } catch (err) {
-          // console.warn(`记录文件 ${context.fileId} 的重试失败失败:`, err);
-        }
-      }
-
-      throw error;
-    }
-
-    // 检查是否超过基本最大重试次数
-    const maxRetries = this.config.maxRetries || 3;
-    if (context.retryCount >= maxRetries) {
-      // 发送重试失败事件
-      this.eventManager.emitRetryFailed(
-        context,
+      // 为了保持向后兼容，也发出旧的事件名称
+      this.eventEmitter.emit('retry:start', {
+        fileId,
+        taskId,
+        delay,
+        retryCount: retryCount + 1,
         error,
-        false,
-        this.getFailCount(context.fileId),
-        maxRetries,
-      );
+      });
 
-      // 如果提供了增强的状态存储，记录失败
-      if (this.stateStorage) {
-        try {
-          await this.stateStorage.recordFailure(
-            context.fileId,
-            error.message,
-            error.code || 'unknown_error',
-          );
-        } catch (err) {
-          // console.warn(`记录文件 ${context.fileId} 的重试失败失败:`, err);
-        }
-      }
+      // 如果配置了存储状态，保存当前重试状态
+      await this.saveRetryState(context);
 
-      throw error;
-    }
+      // 处理重试倒计时
+      this.handleRetryCountdown(taskId, fileId, context.chunkIndex, delay);
 
-    // 计算延迟时间
-    const delay = this.calculateDelay(context.retryCount, error);
-
-    // 创建重试任务ID
-    const taskId = `retry_${context.fileId}_${context.retryCount}_${Date.now()}`;
-
-    // 发送重试开始事件
-    this.eventManager.emitRetryStart(context, error, taskId, delay);
-
-    // 处理倒计时
-    this.handleRetryCountdown(taskId, context.fileId, context.chunkIndex, delay);
-
-    // 执行重试任务
-    return new Promise((resolve, reject) => {
+      // 安排延迟任务
       setTimeout(async () => {
         try {
+          // 再次检查重试是否启用，以应对在延迟期间可能发生的配置变更
+          if (!this.config.enabled) {
+            console.warn('重试已在延迟期间被禁用，取消重试');
+            return;
+          }
+
+          // 发布重试执行事件
+          this.eventEmitter.emit('retry:executing', {
+            fileId,
+            taskId,
+            retryCount: retryCount + 1,
+            error,
+          });
+
+          // 执行重试处理函数
           await handler();
-          // 重试成功
+
+          // 重试成功，发布成功事件
+          this.eventEmitter.emit('retry:success', {
+            fileId,
+            taskId,
+            retryCount: retryCount + 1,
+          });
+
           await this.handleRetrySuccess(context);
-          resolve();
-        } catch (retryError) {
-          // 重试失败
-          if (this.isUploadError(retryError)) {
-            // 递归调用retry
-            try {
-              await this.retry(retryError, context, handler);
-              resolve();
-            } catch (finalError) {
-              reject(finalError);
-            }
+        } catch (err) {
+          // 捕获并处理错误，确保类型安全
+          const retryError = err as Error;
+
+          // 重试失败，发布失败事件
+          const isUploadError = this.isUploadError(retryError);
+
+          // 确保错误是IUploadError类型
+          const errorToEmit: IUploadError = isUploadError
+            ? (retryError as IUploadError)
+            : {
+                ...error,
+                message: retryError.message || error.message,
+                name: retryError.name || error.name,
+              };
+
+          // 确定错误是否可恢复
+          const recoverable = isUploadError
+            ? (retryError as IUploadError).retryable !== false
+            : error.retryable !== false;
+
+          // 检查已重试次数与最大重试次数
+          const nextRetryCount = retryCount + 1;
+          const reachedMaxRetries = nextRetryCount >= maxRetries;
+
+          if (reachedMaxRetries) {
+            // 达到最大重试次数，发出最终失败事件
+            this.eventEmitter.emit('retry:failed', {
+              fileId,
+              error: errorToEmit,
+              reason: `达到最大重试次数 (${maxRetries})`,
+            });
+
+            this.handleRetryFailure(context, errorToEmit, false);
+          } else if (recoverable) {
+            // 还可以继续重试
+            console.warn(
+              `重试失败，但仍可恢复。将安排下一次重试 (${nextRetryCount + 1}/${maxRetries})`,
+              retryError,
+            );
+
+            // 递归尝试下一次重试，增加重试计数
+            await this.retry(
+              errorToEmit,
+              {
+                ...context,
+                retryCount: nextRetryCount,
+                lastError: errorToEmit,
+                startTime: context.startTime || Date.now(),
+              },
+              handler,
+            );
           } else {
-            // 非上传错误，直接拒绝
-            reject(retryError);
+            // 错误不可恢复，发出最终失败事件
+            this.eventEmitter.emit('retry:failed', {
+              fileId,
+              error: errorToEmit,
+              reason: '重试失败且不可恢复',
+            });
+
+            this.handleRetryFailure(context, errorToEmit, false);
           }
         }
       }, delay);
-    });
+    } catch (err) {
+      console.error('在重试过程中发生意外错误:', err);
+      this.eventEmitter.emit('retry:error', {
+        error: err,
+        originalError: error,
+        context,
+      });
+    }
   }
 
   /**

@@ -68,7 +68,12 @@ export class LocalStorageProvider implements StorageProvider {
     if (typeof localStorage === 'undefined') {
       return;
     }
-    localStorage.setItem(key, value);
+
+    try {
+      localStorage.setItem(key, value);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   /**

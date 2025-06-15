@@ -4,7 +4,7 @@
  */
 
 import { DefaultRetryStateStorage, createRetryStateStorage } from '../recovery/retry-state-storage';
-import { NetworkInfo, RetryState, ExtendedRetryState } from '../recovery/retry-types';
+import { NetworkInfo, RetryState } from '../recovery/retry-types';
 
 // 模拟StorageManager
 const mockStorageManager = {
@@ -39,7 +39,7 @@ describe('RetryStateStorage', () => {
   describe('saveState', () => {
     it('应该保存扩展的重试状态', async () => {
       const fileId = 'test-file-id';
-      const state: RetryState = {
+      const state: Partial<RetryState> = {
         fileId,
         retryCount: 3,
         lastRetryTime: 1000,
@@ -48,7 +48,7 @@ describe('RetryStateStorage', () => {
         failedRetries: 1,
       };
 
-      await stateStorage.saveState(fileId, state);
+      await stateStorage.saveState(fileId, state as RetryState);
 
       expect(mockStorageManager.saveRetryState).toHaveBeenCalledWith(
         fileId,
@@ -73,7 +73,7 @@ describe('RetryStateStorage', () => {
   describe('loadState', () => {
     it('应该加载已存在的扩展重试状态', async () => {
       const fileId = 'test-file-id';
-      const existingState: ExtendedRetryState = {
+      const existingState: RetryState = {
         fileId,
         retryCount: 3,
         lastRetryTime: 1000,
@@ -87,6 +87,10 @@ describe('RetryStateStorage', () => {
         expiresAt: 3000,
         networkHistory: [],
         retryHistory: [],
+        syncStatus: {
+          synced: false,
+          lastSyncTime: 0,
+        },
       };
 
       mockStorageManager.getRetryState.mockResolvedValueOnce(existingState);
@@ -99,7 +103,7 @@ describe('RetryStateStorage', () => {
 
     it('应该将基本状态转换为扩展状态', async () => {
       const fileId = 'test-file-id';
-      const basicState: RetryState = {
+      const basicState = {
         fileId,
         retryCount: 3,
         lastRetryTime: 1000,
@@ -143,7 +147,7 @@ describe('RetryStateStorage', () => {
   describe('recordSuccess', () => {
     it('应该记录重试成功', async () => {
       const fileId = 'test-file-id';
-      const existingState: ExtendedRetryState = {
+      const existingState: RetryState = {
         fileId,
         retryCount: 3,
         lastRetryTime: 1000,
@@ -157,6 +161,10 @@ describe('RetryStateStorage', () => {
         expiresAt: 3000,
         networkHistory: [],
         retryHistory: [],
+        syncStatus: {
+          synced: false,
+          lastSyncTime: 0,
+        },
       };
 
       mockStorageManager.getRetryState.mockResolvedValueOnce(existingState);
@@ -181,7 +189,7 @@ describe('RetryStateStorage', () => {
   describe('recordFailure', () => {
     it('应该记录重试失败', async () => {
       const fileId = 'test-file-id';
-      const existingState: ExtendedRetryState = {
+      const existingState: RetryState = {
         fileId,
         retryCount: 3,
         lastRetryTime: 1000,
@@ -195,6 +203,10 @@ describe('RetryStateStorage', () => {
         expiresAt: 3000,
         networkHistory: [],
         retryHistory: [],
+        syncStatus: {
+          synced: false,
+          lastSyncTime: 0,
+        },
       };
 
       mockStorageManager.getRetryState.mockResolvedValueOnce(existingState);
@@ -221,7 +233,7 @@ describe('RetryStateStorage', () => {
   describe('recordNetworkState', () => {
     it('应该记录网络状态', async () => {
       const fileId = 'test-file-id';
-      const existingState: ExtendedRetryState = {
+      const existingState: RetryState = {
         fileId,
         retryCount: 3,
         lastRetryTime: 1000,
@@ -235,6 +247,10 @@ describe('RetryStateStorage', () => {
         expiresAt: 3000,
         networkHistory: [],
         retryHistory: [],
+        syncStatus: {
+          synced: false,
+          lastSyncTime: 0,
+        },
       };
 
       const networkInfo: NetworkInfo = {
@@ -277,7 +293,7 @@ describe('RetryStateStorage', () => {
           },
         }));
 
-      const existingState: ExtendedRetryState = {
+      const existingState: RetryState = {
         fileId,
         retryCount: 3,
         lastRetryTime: 1000,
@@ -291,6 +307,10 @@ describe('RetryStateStorage', () => {
         expiresAt: 3000,
         networkHistory,
         retryHistory: [],
+        syncStatus: {
+          synced: false,
+          lastSyncTime: 0,
+        },
       };
 
       const newNetworkInfo: NetworkInfo = {
@@ -326,7 +346,7 @@ describe('RetryStateStorage', () => {
 
   describe('getAllActiveStates', () => {
     it('应该获取所有活动的重试状态', async () => {
-      const state1: ExtendedRetryState = {
+      const state1: RetryState = {
         fileId: 'file-1',
         retryCount: 3,
         lastRetryTime: 1000,
@@ -340,9 +360,13 @@ describe('RetryStateStorage', () => {
         expiresAt: Date.now() + 10000, // 未过期
         networkHistory: [],
         retryHistory: [],
+        syncStatus: {
+          synced: false,
+          lastSyncTime: 0,
+        },
       };
 
-      const state2: ExtendedRetryState = {
+      const state2: RetryState = {
         fileId: 'file-2',
         retryCount: 2,
         lastRetryTime: 1500,
@@ -356,6 +380,10 @@ describe('RetryStateStorage', () => {
         expiresAt: Date.now() - 10000, // 已过期
         networkHistory: [],
         retryHistory: [],
+        syncStatus: {
+          synced: false,
+          lastSyncTime: 0,
+        },
       };
 
       mockStorageManager.getRetryState.mockResolvedValueOnce(state1).mockResolvedValueOnce(state2);
@@ -369,7 +397,7 @@ describe('RetryStateStorage', () => {
 
   describe('cleanupExpiredStates', () => {
     it('应该清理过期的重试状态', async () => {
-      const state1: ExtendedRetryState = {
+      const state1: RetryState = {
         fileId: 'file-1',
         retryCount: 3,
         lastRetryTime: 1000,
@@ -383,9 +411,13 @@ describe('RetryStateStorage', () => {
         expiresAt: Date.now() + 10000, // 未过期
         networkHistory: [],
         retryHistory: [],
+        syncStatus: {
+          synced: false,
+          lastSyncTime: 0,
+        },
       };
 
-      const state2: ExtendedRetryState = {
+      const state2: RetryState = {
         fileId: 'file-2',
         retryCount: 2,
         lastRetryTime: 1500,
@@ -399,6 +431,10 @@ describe('RetryStateStorage', () => {
         expiresAt: Date.now() - 10000, // 已过期
         networkHistory: [],
         retryHistory: [],
+        syncStatus: {
+          synced: false,
+          lastSyncTime: 0,
+        },
       };
 
       mockStorageManager.getRetryState.mockResolvedValueOnce(state1).mockResolvedValueOnce(state2);
